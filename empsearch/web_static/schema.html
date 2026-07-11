@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schema Graph — OAFC</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/schema.css">
+</head>
+<body>
+<div class="schema-page">
+  <div class="schema-toolbar">
+    <button class="ghost small" id="btnZoomIn">＋ 확대</button>
+    <button class="ghost small" id="btnZoomOut">－ 축소</button>
+    <button class="ghost small" id="btnFit">전체 보기</button>
+    <button class="ghost small" id="btnSizeStage">그래프 크게 1단계</button>
+    <button class="ghost small" id="btnGridLayout">관계 정렬</button>
+    <button class="ghost small" id="btnStarLayout">Star 정렬</button>
+    <button class="ghost small" id="btnSimple">심플 보기</button>
+    <button class="ghost small" id="btnSavePos">위치 저장</button>
+    <button class="ghost small" id="btnResetPos">위치 초기화</button>
+    <button class="ghost small" id="btnLeftPanel">◀ 좌측 패널</button>
+    <button class="ghost small" id="btnRightPanel">우측 패널 ▶</button>
+    <a class="chip" href="/ontology">🧠 Ontology Definer 열기</a>
+    <span class="muted" id="schemaStatus"></span>
+  </div>
+  <div class="schema-main">
+    <aside class="schema-left" id="leftPanel">
+      <h3>테이블 목록</h3>
+      <div id="tableList"></div>
+      <div class="panel-resize-h" id="leftResize"></div>
+    </aside>
+    <div class="schema-canvas-wrap" id="canvasWrap">
+      <svg id="schemaSvg"></svg>
+    </div>
+    <aside class="schema-right" id="rightPanel">
+      <div class="panel-resize-h" id="rightResize"></div>
+      <h3>상세</h3>
+      <div id="detailPanel" class="muted">테이블을 선택하세요. 더블클릭으로 필드를 접거나 펼칩니다.</div>
+    </aside>
+  </div>
+  <div class="panel-resize-v" id="bottomResize"></div>
+  <div class="schema-bottom" id="bottomPanel">
+    <h3 id="bottomTitle">테이블 데이터</h3>
+    <div id="bottomData" class="muted">그래프나 목록에서 테이블을 클릭하면 데이터가 표시됩니다.</div>
+  </div>
+</div>
+<script src="/project.js"></script>
+<script src="/schema.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>챗봇 — OAFC</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="chat-wrap">
+  <div class="panel">
+    <h2>💬 임직원 검색 챗봇</h2>
+    <p class="muted">자연어로 질문하면 Ontology 정보를 활용해 SQL 을 생성하고 테이블 리포트로 답합니다.
+      생성된 SQL, 사용 테이블, Ontology 근거를 답변 하단에 표시합니다.</p>
+    <div class="chat-samples" id="chatSamples"></div>
+    <div class="chat-input-row">
+      <input id="chatInput" placeholder="예: manager가 아닌 재직중인 서울 근무 여성 직원 몇 명이야?">
+      <button id="chatSend">질문</button>
+    </div>
+  </div>
+  <div id="chatLog"></div>
+</div>
+<script src="/project.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

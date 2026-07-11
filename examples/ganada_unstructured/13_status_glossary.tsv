@@ -1,0 +1,4 @@
+code	korean	description
+active	재직/재직중/근무중	정상 근무 상태
+on_leave	휴직/휴직중	육아/질병/학업/군복무 휴직
+resigned	퇴사/퇴직	고용 관계 종료, resignation_date 기록

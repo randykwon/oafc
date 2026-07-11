@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ontology Definer — OAFC</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/ontology.css">
+</head>
+<body>
+<div class="page">
+  <div class="tabbar" id="ontTabs">
+    <button data-tab="generate" class="on">1. 온톨로지 생성</button>
+    <button data-tab="edit">2. 온톨로지 편집</button>
+    <button data-tab="relation">의미 관계 분석</button>
+    <button data-tab="version">3. 온톨로지 버전관리</button>
+  </div>
+
+  <!-- 1. 온톨로지 생성 -->
+  <div class="tab-body" id="tab-generate">
+    <div class="row">
+      <div class="col panel">
+        <h2>생성 대상 선택</h2>
+        <p class="muted">선택한 데이터 범위만 자동 생성합니다. DB/schema/table/field 분석,
+          필드 의미 자동 부여, 값 매핑 자동 생성, 관계 Ontology 자동 생성을 수행합니다.</p>
+        <h3>정형 테이블 <button class="small ghost" id="btnGenAllTables">전체 선택</button></h3>
+        <div id="genTables" class="check-col" style="max-height:260px"></div>
+        <h3>비정형 문서</h3>
+        <div id="genDocs" class="check-col muted" style="max-height:140px"></div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="good" id="btnGenAll">전체 자동 실행</button>
+          <button id="btnGenSelected">선택 자동 실행</button>
+        </div>
+      </div>
+      <div class="col panel">
+        <h2>생성 결과 검토</h2>
+        <div id="genSummary" class="muted">자동 실행 후 생성 결과와 제안 검토 카드가 표시됩니다.</div>
+        <div id="reviewQueue" class="scroll-y" style="max-height:60vh;margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 온톨로지 편집 -->
+  <div class="tab-body" id="tab-edit" hidden>
+    <div class="sem-layout">
+      <aside class="panel sem-tree">
+        <h2>테이블 / 필드</h2>
+        <div id="semTree"></div>
+        <h3>비정형 데이터</h3>
+        <div id="semDocs" class="muted">사용 지정된 문서가 없습니다.</div>
+      </aside>
+      <div class="panel sem-defs">
+        <h2>정의 목록 <span class="badge" id="defCount">0</span></h2>
+        <div id="defList" class="muted scroll-y" style="max-height:65vh">정의가 없습니다.</div>
+      </div>
+      <div class="sem-right">
+        <div class="panel">
+          <h2>온톨로지 편집</h2>
+          <div class="row">
+            <label class="f col"><span>테이블</span><input id="edTable" readonly></label>
+            <label class="f col"><span>필드</span><input id="edField" readonly></label>
+          </div>
+          <label class="f"><span>표시명</span><input id="edLabel"></label>
+          <label class="f"><span>설명</span><textarea id="edDesc" rows="3"></textarea></label>
+          <label class="f"><span>동의어 (쉼표 구분 또는 JSON 배열)</span><input id="edSyn" placeholder="예: 사번,직원번호"></label>
+          <label class="f"><span>값 매핑 JSON (배열, 각 항목은 value 를 가진 객체)</span>
+            <textarea id="edMap" rows="5" placeholder='[{"value": "active", "synonyms": ["재직", "재직중"]}]'></textarea></label>
+          <label class="f" style="display:flex;gap:8px;align-items:center">
+            <input type="checkbox" id="edUseSql" checked style="width:auto"> 자연어 SQL 생성에 적용
+          </label>
+          <label class="f"><span>리뷰 메모</span><textarea id="edNote" rows="2" placeholder="저장 시 [리뷰 메모] 블록으로 관리되고, 다시 불러오면 이 필드에 분리 표시됩니다."></textarea></label>
+          <div class="btn-row">
+            <button class="ghost" id="btnInferOne">선택 자동 유추</button>
+            <button class="good" id="btnDefSave">저장</button>
+            <button class="danger" id="btnDefDelete">삭제</button>
+          </div>
+          <div id="edStatus" class="muted" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 의미 관계 분석 -->
+  <div class="tab-body" id="tab-relation" hidden>
+    <div class="row">
+      <div class="panel" style="flex:0 0 340px">
+        <h2>의미 관계 분석기</h2>
+        <p class="muted">정형 데이터와 비정형 문서 간, 정형 컬럼 간 semantic relationship 후보를 자동 생성합니다.</p>
+        <div class="btn-row">
+          <button id="btnRelAnalyze">자동 관계 분석 실행</button>
+        </div>
+        <h3>필터</h3>
+        <label class="f"><span>관계 유형</span>
+          <select id="relTypeFilter">
+            <option value="">전체 유형</option>
+            <option value="structured_fk">structured_fk</option>
+            <option value="maps_to_column">maps_to_column</option>
+            <option value="alias_of">alias_of</option>
+            <option value="value_of">value_of</option>
+            <option value="policy_of">policy_of</option>
+            <option value="evidence_for">evidence_for</option>
+          </select>
+        </label>
+        <label class="f"><span>상태</span>
+          <select id="relStatusFilter">
+            <option value="">전체</option>
+            <option value="approved">승인</option>
+            <option value="pending">승인대기</option>
+            <option value="excluded">제외</option>
+          </select>
+        </label>
+        <label class="f"><span>검색</span><input id="relSearch" placeholder="테이블/필드/문서 검색"></label>
+        <h3>자동 승인</h3>
+        <div class="row">
+          <input id="relAutoThreshold" class="col" type="number" value="0.85" step="0.05" min="0" max="1">
+          <button class="small good" id="btnRelAutoApprove">신뢰도 기준 자동 승인</button>
+        </div>
+        <h3>관계 후보 <span class="badge" id="relCount">0</span></h3>
+        <div id="relList" class="scroll-y" style="max-height:36vh"></div>
+      </div>
+      <div class="col panel">
+        <h2>관계 그래프
+          <button class="small ghost" id="btnRelView">보기: 관계 중심</button>
+          <button class="small ghost" id="btnRelDepth">그래프 1단계</button>
+        </h2>
+        <svg id="relSvg" style="width:100%;height:52vh;background:radial-gradient(circle at 30% 20%, #141c30, var(--bg));border-radius:10px"></svg>
+        <h3>관계 상세</h3>
+        <div id="relDetail" class="muted">후보 또는 edge 를 클릭하면 근거가 표시됩니다. 승인된 관계는 초록색 edge 로 표시됩니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 온톨로지 버전관리 -->
+  <div class="tab-body" id="tab-version" hidden>
+    <div class="row">
+      <div class="col panel">
+        <h2>Export / Import</h2>
+        <div class="btn-row">
+          <button id="btnExport">Ontology 파일 내보내기</button>
+          <button class="ghost" id="btnImport">Ontology 파일 불러오기</button>
+          <input type="file" id="importFile" accept=".json" hidden>
+        </div>
+        <h2 style="margin-top:18px">버전 관리 <span class="badge">git tree</span></h2>
+        <div class="row">
+          <input id="verName" class="col" placeholder="버전 이름 (예: v1 승인본)">
+          <button class="good" id="btnVerCreate">버전 생성</button>
+        </div>
+        <div id="verTree" class="ver-tree" style="margin-top:12px"></div>
+      </div>
+      <div class="col panel">
+        <h2>삭제 관리</h2>
+        <label class="f"><span>테이블 단위 삭제</span>
+          <div class="row"><select id="delTableSel" class="col"></select>
+          <button class="danger" id="btnDelTable">테이블 삭제</button></div>
+        </label>
+        <label class="f"><span>필드 단위 삭제</span>
+          <div class="row"><select id="delFieldSel" class="col"></select>
+          <button class="danger" id="btnDelField">필드 삭제</button></div>
+        </label>
+        <div class="btn-row" style="margin-top:14px">
+          <button class="danger" id="btnDelAll">전체 삭제</button>
+          <button class="danger ghost" id="btnResetMeta">생성 메타데이터 초기화</button>
+        </div>
+        <div id="verStatus" class="muted" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 실행 진행 팝업 -->
+  <div class="modal-back" id="progressModal" hidden>
+    <div class="modal panel" style="width:min(520px,90vw)">
+      <h2>온톨로지 자동 생성 실행 중</h2>
+      <div id="progressSteps"></div>
+    </div>
+  </div>
+</div>
+<script src="/project.js"></script>
+<script src="/ontology.js"></script>
+</body>
+</html>

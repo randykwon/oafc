@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+data/empsearch.db
+data/empsearch.db-wal
+data/empsearch.db-shm

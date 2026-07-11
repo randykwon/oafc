@@ -1,0 +1,92 @@
+/* Ontology Definer */
+.sem-layout { display: flex; gap: 14px; align-items: flex-start; }
+.sem-tree { flex: 0 0 250px; }
+.sem-defs { flex: 0 0 300px; }
+.sem-right { flex: 1; min-width: 0; }
+
+.tree-table { margin-bottom: 4px; }
+.tree-table > .t-head {
+  font-weight: 600; cursor: pointer; padding: 5px 8px; border-radius: 8px; font-size: 12px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.tree-table > .t-head:hover { background: var(--chip); }
+.tree-table > .t-head.sel { background: var(--chip); outline: 1px solid var(--accent); }
+.tree-fields { margin-left: 10px; border-left: 1px dashed var(--line); padding-left: 8px; }
+.tree-field {
+  font-size: 11px; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 6px;
+  display: flex; justify-content: space-between;
+}
+.tree-field:hover { background: var(--chip); color: var(--text); }
+.tree-field.sel { background: var(--chip); color: var(--accent); }
+.tree-field .has-def { color: var(--good); }
+
+.def-item {
+  border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px; margin-bottom: 6px;
+  background: var(--bg2); cursor: pointer; font-size: 12px;
+}
+.def-item:hover, .def-item.sel { border-color: var(--accent); }
+.def-item .path { color: var(--muted); font-size: 10px; }
+
+.review-card {
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+  background: var(--bg2);
+}
+.review-card.applied { opacity: .5; }
+.review-card .conf-bar {
+  height: 5px; border-radius: 3px; background: var(--chip); margin: 6px 0; overflow: hidden;
+}
+.review-card .conf-fill { height: 100%; background: linear-gradient(90deg, var(--warn), var(--good)); }
+.review-card .evidence { font-size: 11px; color: var(--muted); }
+
+.rel-item {
+  border: 1px solid var(--line); border-radius: 9px; padding: 6px 9px; margin-bottom: 5px;
+  background: var(--bg2); cursor: pointer; font-size: 11px;
+}
+.rel-item:hover, .rel-item.sel { border-color: var(--accent); }
+.rel-item .st-approved { color: var(--good); }
+.rel-item .st-pending { color: var(--warn); }
+.rel-item .st-excluded { color: var(--bad); }
+
+.rel-node { cursor: pointer; }
+.rel-node circle { fill: var(--panel2); stroke: var(--line); stroke-width: 1.5; }
+.rel-node.center circle { stroke: var(--accent); stroke-width: 2.5; }
+.rel-node text { font-size: 10px; fill: var(--text); text-anchor: middle; }
+.rel-edge { stroke: #4a5a85; stroke-width: 1.6; cursor: pointer; }
+.rel-edge.approved { stroke: var(--good); stroke-width: 2.4; }
+.rel-edge.excluded { stroke: var(--bad); stroke-dasharray: 4 3; opacity: .5; }
+.rel-edge:hover { stroke: var(--accent); }
+
+/* git tree 스타일 버전 목록 */
+.ver-tree { position: relative; padding-left: 22px; }
+.ver-tree::before {
+  content: ""; position: absolute; left: 7px; top: 4px; bottom: 4px;
+  width: 2px; background: var(--line);
+}
+.ver-item {
+  position: relative; padding: 6px 10px; margin-bottom: 10px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; font-size: 12px;
+}
+.ver-item::before {
+  content: ""; position: absolute; left: -19px; top: 12px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent2); border: 2px solid var(--bg);
+}
+.ver-item:first-child::before { background: var(--good); }
+
+/* 실행 진행 팝업 */
+.modal-back {
+  position: fixed; inset: 0; background: rgba(5, 8, 16, .7); z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal { max-height: 84vh; overflow-y: auto; }
+.progress-step {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px dashed var(--line); font-size: 13px;
+}
+.progress-step .st { width: 20px; text-align: center; }
+.progress-step.pending { color: var(--muted); }
+.progress-step.done .st { color: var(--good); }
+
+.check-col { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
+.check-col label { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text); }
+.check-col input { width: auto; }
