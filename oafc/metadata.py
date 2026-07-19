@@ -56,10 +56,30 @@ class IntegratorStore:
         "ANALYZE", "REINDEX", "GRANT", "REVOKE", "CALL", "EXECUTE", "DO",
         "HANDLER", "LOAD", "LOCK", "UNLOCK", "SET", "USE", "BEGIN", "START",
         "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE", "INTO", "OUTFILE", "DUMPFILE",
+        "PROCEDURE",
+    }
+    ANALYSIS_ALLOWED_FUNCTIONS = {
+        "ABS", "AVG", "COUNT", "MAX", "MIN", "SUM", "TOTAL", "ROUND", "CEIL",
+        "CEILING", "FLOOR", "POWER", "SQRT", "MOD", "COALESCE", "IFNULL", "NULLIF",
+        "IIF", "IF", "GREATEST", "LEAST", "LOWER", "UPPER", "LENGTH", "CHAR_LENGTH",
+        "OCTET_LENGTH", "TRIM", "LTRIM", "RTRIM", "SUBSTR", "SUBSTRING", "CONCAT",
+        "CONCAT_WS", "HEX", "UNHEX", "QUOTE", "CAST", "DATE", "TIME", "DATETIME",
+        "JULIANDAY", "UNIXEPOCH", "STRFTIME", "YEAR", "MONTH", "DAY", "DAYOFMONTH",
+        "NOW", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "DATE_FORMAT",
+        "JSON_EXTRACT", "JSON_TYPE", "JSON_VALID", "JSON_ARRAY_LENGTH", "JSON_UNQUOTE",
+        "ROW_NUMBER", "RANK", "DENSE_RANK", "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE",
+        "VERSION", "SQLITE_VERSION",
+    }
+    ANALYSIS_PAREN_KEYWORDS = {
+        "AS", "IN", "EXISTS", "OVER", "VALUES", "FROM", "WHERE", "WHEN", "THEN",
+        "ELSE", "ON", "HAVING", "AND", "OR", "NOT", "SELECT", "JOIN", "LEFT",
+        "RIGHT", "INNER", "OUTER", "CROSS", "BY", "ORDER", "GROUP", "LIMIT",
+        "OFFSET", "UNION", "ALL", "DISTINCT", "CASE", "FILTER", "WITH", "RECURSIVE",
     }
     ANALYSIS_FORBIDDEN_FUNCTIONS = {
         "SLEEP", "BENCHMARK", "GET_LOCK", "RELEASE_LOCK", "IS_FREE_LOCK",
-        "LOAD_FILE", "LOAD_EXTENSION", "READFILE", "WRITEFILE",
+        "LOAD_FILE", "LOAD_EXTENSION", "READFILE", "WRITEFILE", "SYS_EXEC", "SYS_EVAL",
+        "RELEASE_ALL_LOCKS",
     }
 
     def __init__(self, metadata_path: os.PathLike[str] | str,
@@ -184,8 +204,8 @@ class IntegratorStore:
         return path
 
     @staticmethod
-    def _source_connection(path: Path) -> sqlite3.Connection:
-        connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5)
+    def _source_connection(path: Path, timeout: float = 5.0) -> sqlite3.Connection:
+        connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=timeout)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only=ON")
         return connection
@@ -415,6 +435,10 @@ class IntegratorStore:
         statement = query.strip()
         if len(statement.encode("utf-8")) > cls.ANALYSIS_MAX_QUERY_BYTES:
             raise IntegratorError("analysis query is too large")
+        # SQLite and MySQL SQL modes disagree on backslash escaping. Reject it so the
+        # conservative lexer cannot interpret a different statement than the database.
+        if "\\" in statement:
+            raise IntegratorError("backslash escapes are not allowed in analysis queries")
         code: list[str] = []
         index = 0
         while index < len(statement):
@@ -425,14 +449,16 @@ class IntegratorStore:
                 index += 1
                 while index < len(statement):
                     current = statement[index]
-                    if current == "\\":
-                        index += 2
-                        continue
                     if current == quote:
                         if index + 1 < len(statement) and statement[index + 1] == quote:
                             index += 2
                             continue
                         index += 1
+                        lookahead = index
+                        while lookahead < len(statement) and statement[lookahead].isspace():
+                            lookahead += 1
+                        if lookahead < len(statement) and statement[lookahead] == "(":
+                            raise IntegratorError("quoted SQL function names are not allowed")
                         break
                     index += 1
                 else:
@@ -456,11 +482,20 @@ class IntegratorStore:
         blocked = sorted(words.intersection(cls.ANALYSIS_FORBIDDEN_WORDS))
         if blocked:
             raise IntegratorError("read-only analysis rejected SQL keyword: %s" % blocked[0])
-        if re.search(r"\bFOR\s+UPDATE\b|\bLOCK\s+IN\s+SHARE\s+MODE\b", normalized):
+        if re.search(r"\bFOR\s+(?:UPDATE|SHARE)\b|\bLOCK\s+IN\s+SHARE\s+MODE\b", normalized):
             raise IntegratorError("locking reads are not allowed in analysis queries")
-        function_pattern = r"\b(?:%s)\s*\(" % "|".join(cls.ANALYSIS_FORBIDDEN_FUNCTIONS)
-        if re.search(function_pattern, normalized) or ":=" in visible:
-            raise IntegratorError("unsafe SQL function or assignment is not allowed")
+        function_names = set(re.findall(r"\b([A-Z_][A-Z0-9_$]*)\s*\(", normalized))
+        cte_names = set(re.findall(
+            r"(?:\bWITH(?:\s+RECURSIVE)?|,)\s+([A-Z_][A-Z0-9_$]*)\s*"
+            r"\([^)]*\)\s+AS\s*\(", normalized))
+        function_names.difference_update(cls.ANALYSIS_PAREN_KEYWORDS)
+        function_names.difference_update(cte_names)
+        unsafe_functions = function_names.intersection(cls.ANALYSIS_FORBIDDEN_FUNCTIONS)
+        unknown_functions = function_names.difference(cls.ANALYSIS_ALLOWED_FUNCTIONS)
+        if unsafe_functions or unknown_functions or ":=" in visible:
+            rejected = sorted(unsafe_functions or unknown_functions)
+            suffix = ": %s" % rejected[0] if rejected else ""
+            raise IntegratorError("unsafe or unsupported SQL function or assignment%s" % suffix)
         return statement
 
     @staticmethod
@@ -479,8 +514,10 @@ class IntegratorStore:
 
     @staticmethod
     def _analysis_value(value: Any) -> Any:
-        if value is None or isinstance(value, (bool, int, float, str)):
+        if value is None or isinstance(value, (bool, int, str)):
             return value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else str(value)
         if isinstance(value, bytes):
             return "0x" + value.hex()
         if isinstance(value, (dt.date, dt.time)):
@@ -519,14 +556,17 @@ class IntegratorStore:
             path = self._allowed_source(profile["location"])
             deadline = started + timeout / 1000
             try:
-                with self._source_connection(path) as conn:
+                with self._source_connection(path, timeout=timeout / 1000) as conn:
+                    conn.execute("PRAGMA busy_timeout=%d" % timeout)
                     conn.set_progress_handler(
                         lambda: 1 if time.monotonic() >= deadline else 0, 1_000)
                     cursor = conn.execute(statement)
                     return self._analysis_result(
                         cursor, row_limit, started, "sqlite", path.name)
             except sqlite3.Error as exc:
-                message = ("analysis query timed out" if "interrupted" in str(exc).lower()
+                lowered = str(exc).lower()
+                message = ("analysis query timed out" if
+                           ("interrupted" in lowered or "locked" in lowered)
                            else "analysis query failed: %s" % str(exc)[:300])
                 raise IntegratorError(message) from exc
 

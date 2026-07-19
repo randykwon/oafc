@@ -1,4 +1,5 @@
 import sqlite3
+import time
 
 import pytest
 
@@ -56,16 +57,37 @@ def test_analysis_allows_literals_but_serializes_binary(store, source_root):
     ("SELECT 1; SELECT 2", "one SQL statement"),
     ("SELECT 1 -- hidden statement", "comments"),
     ("SELECT /* comment */ 1", "comments"),
-    ("SELECT SLEEP(1)", "unsafe SQL"),
+    ("SELECT SLEEP(1)", "unsafe or unsupported"),
     ("SELECT * FROM products INTO OUTFILE '/tmp/data'", "INTO"),
     ("SELECT * FROM products FOR UPDATE", "UPDATE"),
     ("SELECT @value := 1", "assignment"),
+    ("SELECT 'x\\', SLEEP(10), 'alias\\' /* ' */", "backslash"),
+    ("WITH c AS (SELECT 'x\\') UPDATE products SET title='x' WHERE 'a\\' /* ' */", "backslash"),
+    ("SELECT SYS_EXEC('touch /tmp/unsafe')", "unsupported SQL function"),
+    ("SELECT custom_side_effect()", "unsupported SQL function"),
+    ("SELECT `custom_side_effect`()", "quoted SQL function"),
+    ('SELECT "custom_side_effect"()', "quoted SQL function"),
+    ("SELECT * FROM products FOR SHARE", "locking reads"),
 ])
 def test_analysis_rejects_non_read_only_sql(store, source_root, query, message):
     _root, source = source_root
     profile = _sqlite_profile(store, source)
     with pytest.raises(IntegratorError, match=message):
         store.analyze_query(profile["id"], query)
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT * FROM (SELECT 1 AS value) AS nested",
+    "SELECT * FROM products WHERE (unit_price > 10)",
+    "WITH c(value) AS (VALUES (1)) SELECT value FROM c",
+    "SELECT CASE WHEN (1=1) THEN 1 ELSE 0 END AS value",
+    "SELECT COUNT(*) AS count, ROUND(AVG(unit_price), 2) AS average FROM products",
+])
+def test_analysis_allows_common_parenthesized_select_syntax(store, source_root, query):
+    _root, source = source_root
+    profile = _sqlite_profile(store, source)
+    result = store.analyze_query(profile["id"], query)
+    assert result["columns"]
 
 
 @pytest.mark.parametrize("field, value, message", [
@@ -87,13 +109,35 @@ def test_sqlite_analysis_timeout_interrupts_expensive_query(store, source_root):
     _root, source = source_root
     profile = _sqlite_profile(store, source)
     query = """
-        WITH RECURSIVE counter(value) AS (
-          SELECT 1 UNION ALL SELECT value + 1 FROM counter WHERE value < 100000000
+        WITH RECURSIVE counter AS (
+          SELECT 1 AS value UNION ALL SELECT value + 1 FROM counter WHERE value < 100000000
         ) SELECT SUM(value) FROM counter
     """
     with pytest.raises(IntegratorError, match="timed out"):
         store.analyze_query(profile["id"], query, timeout_ms=100)
 
+
+
+def test_sqlite_analysis_lock_wait_respects_request_timeout(store, source_root):
+    _root, source = source_root
+    profile = _sqlite_profile(store, source)
+    locker = sqlite3.connect(source, timeout=0)
+    try:
+        locker.execute("BEGIN EXCLUSIVE")
+        started = time.monotonic()
+        with pytest.raises(IntegratorError, match="timed out"):
+            store.analyze_query(profile["id"], "SELECT * FROM products", timeout_ms=100)
+        assert time.monotonic() - started < 1.0
+    finally:
+        locker.rollback()
+        locker.close()
+
+
+def test_analysis_normalizes_non_finite_float_for_strict_json(store, source_root):
+    _root, source = source_root
+    profile = _sqlite_profile(store, source)
+    result = store.analyze_query(profile["id"], "SELECT 1e999 AS value")
+    assert result["rows"] == [["inf"]]
 
 def test_mysql_analysis_uses_database_scope_and_truncates(tmp_path):
     store = FakeMySQLStore(tmp_path / "meta.db", [tmp_path], lambda _alias: "secret")

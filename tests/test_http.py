@@ -139,6 +139,10 @@ def test_http_read_only_analysis_and_connection_delete(store, source_root):
         assert result["rows"] == [[1]]
         assert result["truncated"] is False
 
+        status, non_finite = call(base, "/api/connections/%s/analysis/query" % connection_id,
+                                  "POST", {"query": "SELECT 1e999 AS value"})
+        assert status == 200 and non_finite["rows"] == [["inf"]]
+
         status, rejected = call(base, "/api/connections/%s/analysis/query" % connection_id,
                                 "POST", {"query": "DELETE FROM products"})
         assert status == 400

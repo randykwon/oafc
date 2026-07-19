@@ -11,7 +11,11 @@
     inventory: null,
     suggestions: [],
     analysisSchema: null,
-    analysisResult: null
+    analysisResult: null,
+    analysisEpoch: 0,
+    analysisQueryEpoch: 0,
+    inventoryEpoch: 0,
+    schemaEpoch: 0
   };
 
   function $(id) { return document.getElementById(id); }
@@ -90,7 +94,7 @@
       button.classList.toggle("done", number < step);
     });
     if (step === 3 && state.activeId) {
-      loadInventory().then(function () { return loadSchema(); });
+      loadInventory().then(function (current) { if (current !== false) return loadSchema(); });
     }
     if (step === 4 && state.activeId) loadApplied();
   }
@@ -121,7 +125,10 @@
       renderConnections();
       if (state.activeId) {
         var current = state.connections.filter(function (item) { return item.id === state.activeId; })[0];
-        if (current) state.activeProfile = current;
+        if (current) {
+          state.activeProfile = current;
+          $("connectionBadge").textContent = current.status;
+        }
       }
       $("openAnalysisBtn").disabled = !state.activeProfile || state.activeProfile.status !== "connected";
     });
@@ -154,7 +161,9 @@
       main.addEventListener("keydown", function (event) {
         if (event.key === "Enter" || event.key === " ") activateConnection(profile);
       });
-      item.querySelector("[data-action=edit]").addEventListener("click", function () { activateConnection(profile); });
+      item.querySelector("[data-action=edit]").addEventListener("click", function () {
+        activateConnection(profile, 2);
+      });
       item.querySelector("[data-action=test]").addEventListener("click", function () {
         activateConnection(profile);
         testActiveConnection();
@@ -164,7 +173,11 @@
     });
   }
 
-  function activateConnection(profile) {
+  function activateConnection(profile, targetStep) {
+    state.analysisEpoch += 1;
+    state.analysisQueryEpoch += 1;
+    state.inventoryEpoch += 1;
+    state.schemaEpoch += 1;
     state.activeId = profile.id;
     state.activeProfile = profile;
     state.schema = null;
@@ -186,8 +199,11 @@
     $("connectionBadge").textContent = profile.status;
     $("testConnectionBtn").disabled = false;
     $("openAnalysisBtn").disabled = profile.status !== "connected";
+    $("runAnalysisBtn").disabled = false;
     renderConnections();
-    if (profile.status === "connected") {
+    if (targetStep) {
+      showStep(targetStep);
+    } else if (profile.status === "connected") {
       showStep(3);
     } else {
       showStep(2);
@@ -195,6 +211,10 @@
   }
 
   function clearActiveConnection() {
+    state.analysisEpoch += 1;
+    state.analysisQueryEpoch += 1;
+    state.inventoryEpoch += 1;
+    state.schemaEpoch += 1;
     state.activeId = null;
     state.activeProfile = null;
     state.schema = null;
@@ -359,28 +379,38 @@
         if (!result.connected) throw new Error(result.error || "연결할 수 없습니다.");
         notice("connectionResult", "연결 성공 · " + result.engine.toUpperCase() + " " + result.version +
           " · DB " + result.database_count + "개 · 테이블 " + result.table_count + "개", "good");
-        return refreshConnections();
-      }).then(function () {
-        showStep(3);
-        refreshWorkflow();
+        return refreshConnections().then(function () { showStep(3); });
       }).catch(function (error) {
-        notice("connectionResult", error.message, "bad");
-      }).finally(function () { button.disabled = false; });
+        return refreshConnections().then(function () {
+          notice("connectionResult", error.message, "bad");
+          showStep(2);
+        });
+      }).finally(function () {
+        button.disabled = false;
+        refreshWorkflow();
+      });
   }
+
   $("testConnectionBtn").addEventListener("click", testActiveConnection);
 
 
   function loadInventory() {
-    if (!state.activeId) return Promise.resolve();
+    if (!state.activeId) return Promise.resolve(false);
+    var connectionId = state.activeId;
+    var requestEpoch = ++state.inventoryEpoch;
     $("databaseInventory").className = "database-inventory empty";
     $("databaseInventory").textContent = "서버와 DB inventory를 분석하는 중…";
-    return request("/api/connections/" + encodeURIComponent(state.activeId) + "/inventory")
+    return request("/api/connections/" + encodeURIComponent(connectionId) + "/inventory")
       .then(function (inventory) {
+        if (state.activeId !== connectionId || state.inventoryEpoch !== requestEpoch) return false;
         state.inventory = inventory;
         renderInventory();
+        return true;
       }).catch(function (error) {
+        if (state.activeId !== connectionId || state.inventoryEpoch !== requestEpoch) return false;
         $("databaseInventory").textContent = error.message;
         toast(error.message);
+        return false;
       });
   }
 
@@ -424,26 +454,33 @@
   $("analyzeDatabasesBtn").addEventListener("click", function () { loadSchema(); });
 
   function loadSchema() {
-    if (!state.activeId) return Promise.resolve();
+    if (!state.activeId) return Promise.resolve(false);
+    var connectionId = state.activeId;
+    var requestEpoch = ++state.schemaEpoch;
+    var engine = state.activeProfile && state.activeProfile.engine;
     $("tableList").className = "table-list empty";
     $("tableList").textContent = "스키마를 불러오는 중…";
-    var path = "/api/connections/" + encodeURIComponent(state.activeId) + "/schema";
-    if (state.activeProfile && state.activeProfile.engine === "mysql") {
+    var path = "/api/connections/" + encodeURIComponent(connectionId) + "/schema";
+    if (engine === "mysql") {
       var databases = selectedDatabases();
       if (!databases.length) {
         $("tableList").textContent = "분석할 DB를 하나 이상 선택하세요.";
-        return Promise.resolve();
+        return Promise.resolve(false);
       }
       path += "?" + databases.map(function (name) { return "database=" + encodeURIComponent(name); }).join("&");
     }
     return request(path)
       .then(function (schema) {
+        if (state.activeId !== connectionId || state.schemaEpoch !== requestEpoch) return false;
         state.schema = schema;
         state.activeProfile = schema.connection;
         renderSchema();
+        return true;
       }).catch(function (error) {
+        if (state.activeId !== connectionId || state.schemaEpoch !== requestEpoch) return false;
         $("tableList").textContent = error.message;
         toast(error.message);
+        return false;
       });
   }
 
@@ -625,9 +662,11 @@
     }
   }
 
-  function loadAnalysisSchema() {
+  function loadAnalysisSchema(epoch) {
     if (!state.activeId) return Promise.resolve();
-    var path = "/api/connections/" + encodeURIComponent(state.activeId) + "/schema";
+    var requestEpoch = epoch || ++state.analysisEpoch;
+    var connectionId = state.activeId;
+    var path = "/api/connections/" + encodeURIComponent(connectionId) + "/schema";
     var database = $("analysisDatabase").value;
     if (state.activeProfile.engine === "mysql" && database) {
       path += "?database=" + encodeURIComponent(database);
@@ -635,9 +674,11 @@
     $("analysisSchemaList").className = "analysis-schema-list empty";
     $("analysisSchemaList").textContent = "스키마를 불러오는 중…";
     return request(path).then(function (schema) {
+      if (state.activeId !== connectionId || state.analysisEpoch !== requestEpoch) return;
       state.analysisSchema = schema;
       renderAnalysisSchema();
     }).catch(function (error) {
+      if (state.activeId !== connectionId || state.analysisEpoch !== requestEpoch) return;
       $("analysisSchemaList").textContent = error.message;
       notice("analysisStatus", error.message, "bad");
     });
@@ -677,14 +718,21 @@
 
   function loadAnalysisContext() {
     if (!state.activeId) return Promise.resolve();
+    var connectionId = state.activeId;
+    var requestEpoch = ++state.analysisEpoch;
     $("analysisConnectionName").textContent = state.activeProfile.name;
     notice("analysisStatus", "DB inventory와 스키마를 불러오고 있습니다.", "neutral");
-    return request("/api/connections/" + encodeURIComponent(state.activeId) + "/inventory")
+    return request("/api/connections/" + encodeURIComponent(connectionId) + "/inventory")
       .then(function (inventory) {
+        if (state.activeId !== connectionId || state.analysisEpoch !== requestEpoch) return;
         state.inventory = inventory;
         renderAnalysisDatabases(inventory);
-        return loadAnalysisSchema();
-      }).catch(function (error) { notice("analysisStatus", error.message, "bad"); });
+        return loadAnalysisSchema(requestEpoch);
+      }).catch(function (error) {
+        if (state.activeId === connectionId && state.analysisEpoch === requestEpoch) {
+          notice("analysisStatus", error.message, "bad");
+        }
+      });
   }
 
   function openAnalysis() {
@@ -750,34 +798,46 @@
     if (!state.activeId) return;
     var query = $("analysisQuery").value.trim();
     if (!query) { toast("실행할 SELECT 쿼리를 입력하세요."); return; }
+    var connectionId = state.activeId;
+    var contextEpoch = state.analysisEpoch;
+    var requestEpoch = ++state.analysisQueryEpoch;
     var button = $("runAnalysisBtn");
     button.disabled = true;
     notice("analysisStatus", "읽기 전용 트랜잭션에서 쿼리를 실행하고 있습니다.", "neutral");
-    request("/api/connections/" + encodeURIComponent(state.activeId) + "/analysis/query",
+    request("/api/connections/" + encodeURIComponent(connectionId) + "/analysis/query",
       jsonOptions("POST", {
         query: query,
         database: state.activeProfile.engine === "mysql" ? $("analysisDatabase").value : undefined,
         max_rows: Number($("analysisMaxRows").value),
         timeout_ms: Number($("analysisTimeout").value)
       }))
-      .then(renderAnalysisResult)
-      .catch(function (error) {
+      .then(function (result) {
+        if (state.activeId === connectionId && state.analysisEpoch === contextEpoch &&
+            state.analysisQueryEpoch === requestEpoch) {
+          renderAnalysisResult(result);
+        }
+      }).catch(function (error) {
+        if (state.activeId !== connectionId || state.analysisEpoch !== contextEpoch ||
+            state.analysisQueryEpoch !== requestEpoch) return;
         notice("analysisStatus", error.message, "bad");
         toast(error.message);
-      }).finally(function () { button.disabled = false; });
+      }).finally(function () {
+        if (state.activeId === connectionId && state.analysisEpoch === contextEpoch &&
+            state.analysisQueryEpoch === requestEpoch) button.disabled = false;
+      });
   }
 
   function csvCell(value) {
     if (value == null) return "";
     var text = String(value);
-    if (/^[=+@-]/.test(text)) text = "'" + text;
+    if (/^[\s\x00-\x1f]*[=+@-]/.test(text)) text = "'" + text;
     return '"' + text.replace(/"/g, '""') + '"';
   }
 
   $("openAnalysisBtn").addEventListener("click", openAnalysis);
   $("closeAnalysisBtn").addEventListener("click", function () { showStep(state.step || 3); });
   $("refreshAnalysisSchemaBtn").addEventListener("click", loadAnalysisContext);
-  $("analysisDatabase").addEventListener("change", loadAnalysisSchema);
+  $("analysisDatabase").addEventListener("change", function () { loadAnalysisSchema(); });
   $("runAnalysisBtn").addEventListener("click", runAnalysis);
   $("clearAnalysisBtn").addEventListener("click", function () {
     $("analysisQuery").value = "";

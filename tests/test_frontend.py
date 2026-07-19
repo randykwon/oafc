@@ -41,5 +41,15 @@ def test_frontend_manages_connections_and_runs_safe_analysis():
     assert '"/analysis/query"' in source
     assert 'max_rows:' in source and 'timeout_ms:' in source
     assert 'td.textContent' in source
-    assert '/^[=+@-]/' in source
+    assert '/^[\\s\\x00-\\x1f]*[=+@-]/' in source
     assert 'URL.revokeObjectURL' in source
+
+
+def test_frontend_connection_state_and_analysis_requests_are_scoped():
+    source = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "activateConnection(profile, 2)" in source
+    assert "state.analysisEpoch" in source
+    assert "state.inventoryEpoch" in source and "state.schemaEpoch" in source
+    assert "state.activeId === connectionId" in source
+    assert 'addEventListener("change", function () { loadAnalysisSchema(); })' in source
+    assert "return refreshConnections().then(function ()" in source
