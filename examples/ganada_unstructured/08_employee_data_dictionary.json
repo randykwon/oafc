@@ -1,7 +1,0 @@
-{
-  "employee_no": {"label": "직원 사번", "format": "STEEL-00000", "synonyms": ["사번", "직원번호"]},
-  "status": {"label": "재직 상태", "values": {"active": "재직", "on_leave": "휴직", "resigned": "퇴사"}},
-  "management_level": {"label": "관리 레벨", "values": {"manager": "관리자", "team_lead": "팀리드", "executive": "임원", "individual_contributor": "실무자"}},
-  "work_location": {"label": "근무지", "values": ["서울 본사", "포항 제철소", "광양 제철소", "송도 R&D 캠퍼스"]},
-  "years_of_service": {"label": "근속연수", "synonyms": ["근속", "연차", "년차"]}
-}

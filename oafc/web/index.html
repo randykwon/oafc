@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OAFC DB Integrator</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="brand">OAFC</div>
+      <div class="subtitle">DB Integrator · Discover, Select, Define</div>
+    </div>
+    <div class="topbar-actions">
+      <button id="openAnalysisBtn" class="ghost small" disabled>데이터 분석 도구</button>
+      <div id="workflowSummary" class="workflow-summary">상태를 불러오는 중…</div>
+    </div>
+  </header>
+
+  <nav class="steps" aria-label="통합 단계">
+    <button class="step active" data-step="1"><span>1</span><b>DB 탐색</b><small>후보 찾기</small></button>
+    <div class="step-line"></div>
+    <button class="step" data-step="2"><span>2</span><b>정보 저장</b><small>연결 확인</small></button>
+    <div class="step-line"></div>
+    <button class="step" data-step="3"><span>3</span><b>테이블 선택</b><small>사용 범위 결정</small></button>
+    <div class="step-line"></div>
+    <button class="step" data-step="4"><span>4</span><b>온톨로지 적용</b><small>의미 정의</small></button>
+  </nav>
+
+  <div class="layout">
+    <aside class="sidebar panel">
+      <div class="panel-head">
+        <div><span class="eyebrow">SAVED SOURCES</span><h2>저장된 연결</h2></div>
+        <span id="connectionCount" class="counter">0</span>
+      </div>
+      <div class="connection-toolbar">
+        <button id="newConnectionBtn" class="ghost small">＋ 새 연결</button>
+      </div>
+      <div id="connectionList" class="connection-list empty">저장된 연결이 없습니다.</div>
+    </aside>
+
+    <main>
+      <section id="step1" class="panel stage active">
+        <div class="stage-head">
+          <div><span class="eyebrow">STEP 1</span><h1>사용 가능한 DB를 찾습니다</h1>
+            <p>서버가 허용한 디렉터리에서 SQLite 파일을 읽기 전용으로 탐색합니다.</p></div>
+          <div class="inline-actions"><button id="mysqlSetupBtn" class="ghost">MySQL 서버 등록</button><button id="discoverBtn" class="primary">SQLite 탐색</button></div>
+        </div>
+        <div id="discoveryStatus" class="notice neutral">탐색을 시작하면 파일 크기와 테이블 수를 확인합니다.</div>
+        <div id="discoveryList" class="card-grid"></div>
+      </section>
+
+      <section id="step2" class="panel stage" hidden>
+        <div class="stage-head">
+          <div><span class="eyebrow">STEP 2</span><h1>연결 정보를 저장하고 확인합니다</h1>
+            <p>비밀번호 원문은 저장하지 않습니다. 필요한 경우 보안 저장소의 alias만 기록하세요.</p></div>
+          <span id="connectionBadge" class="status-badge">미저장</span>
+        </div>
+        <form id="connectionForm" class="form-grid">
+          <label><span>연결 이름</span><input id="profileName" maxlength="120" required placeholder="예: 분석 서버"></label>
+          <label><span>엔진</span><select id="profileEngine"><option value="sqlite">SQLite</option><option value="mysql">MySQL</option></select></label>
+          <label id="sqliteLocationField" class="wide"><span>SQLite 파일</span><input id="profileLocation" readonly placeholder="1단계에서 DB를 선택하세요"></label>
+          <div id="mysqlFields" class="wide mysql-fields" hidden>
+            <label><span>Host</span><input id="mysqlHost" placeholder="db.internal.example"></label>
+            <label><span>Port</span><input id="mysqlPort" type="number" min="1" max="65535" value="3306"></label>
+            <label><span>Username</span><input id="mysqlUsername" autocomplete="off" placeholder="readonly_user"></label>
+            <label><span>기본 분석 DB <em>선택, 쉼표 구분</em></span><input id="mysqlDatabase" placeholder="analytics, catalog"></label>
+            <label><span>TLS 모드</span><select id="mysqlTlsMode"><option value="verify_identity">인증서 + 호스트명 검증 (권장)</option><option value="verify_ca">인증서 검증</option><option value="required">암호화만 필수</option><option value="disabled">사용 안 함 (개발 전용)</option></select></label>
+            <label><span>SSL CA 파일 <em>선택</em></span><input id="mysqlSslCa" placeholder="/etc/ssl/certs/mysql-ca.pem"></label>
+          </div>
+          <label class="wide"><span>Credential alias <em>선택 · 비밀번호는 OAFC_CREDENTIAL_&lt;ALIAS&gt; 환경변수로 주입</em></span><input id="credentialAlias" maxlength="160" placeholder="예: WAREHOUSE_READONLY"></label>
+          <div class="wide actions">
+            <button type="button" id="backToDiscover" class="ghost">이전</button>
+            <button type="submit" class="primary">연결정보 저장</button>
+            <button type="button" id="testConnectionBtn" disabled>연결 테스트</button>
+          </div>
+        </form>
+        <div id="connectionResult" class="notice neutral">DB 후보를 선택하고 연결정보를 저장하세요.</div>
+      </section>
+
+      <section id="step3" class="panel stage" hidden>
+        <div class="stage-head">
+          <div><span class="eyebrow">STEP 3</span><h1>Agent가 사용할 테이블을 선택합니다</h1>
+            <p>저장된 선택 범위만 다음 온톨로지 단계에서 사용됩니다.</p></div>
+          <div class="inline-actions"><button id="selectAllBtn" class="ghost small">전체 선택</button><button id="clearAllBtn" class="ghost small">선택 해제</button></div>
+        </div>
+        <div id="inventoryPanel" class="inventory-panel">
+          <div id="serverInfo" class="metrics"></div>
+          <div class="inventory-head"><div><span class="eyebrow">DATABASE INVENTORY</span><h2>접근 가능한 DB</h2></div><button id="analyzeDatabasesBtn" class="ghost small">선택 DB 스키마 분석</button></div>
+          <div id="databaseInventory" class="database-inventory empty">연결 테스트 후 서버 inventory를 불러옵니다.</div>
+        </div>
+        <div class="inventory-head"><div><span class="eyebrow">BUSINESS TABLES</span><h2>업무테이블 지정</h2></div></div>
+        <div id="schemaSummary" class="metrics"></div>
+        <div id="tableList" class="table-list empty">연결 테스트 후 스키마를 불러옵니다.</div>
+        <div class="actions footer-actions">
+          <button id="backToProfile" class="ghost">이전</button>
+          <button id="saveSelectionBtn" class="primary">선택 저장 후 계속</button>
+        </div>
+      </section>
+
+      <section id="step4" class="panel stage" hidden>
+        <div class="stage-head">
+          <div><span class="eyebrow">STEP 4</span><h1>선택한 테이블에 의미를 적용합니다</h1>
+            <p>초안의 label·설명·동의어를 검토한 뒤 서버 메타데이터로 적용하세요.</p></div>
+          <button id="suggestBtn">온톨로지 초안 생성</button>
+        </div>
+        <div id="ontologyStatus" class="notice neutral">선택된 테이블을 기준으로 초안을 생성하세요.</div>
+        <div id="suggestionList" class="ontology-list"></div>
+        <div class="actions footer-actions">
+          <button id="backToTables" class="ghost">이전</button>
+          <button id="applyOntologyBtn" class="primary" disabled>온톨로지 적용</button>
+        </div>
+        <div class="applied-block">
+          <div class="panel-head"><div><span class="eyebrow">APPLIED</span><h2>적용된 정의</h2></div><span id="ontologyCount" class="counter">0</span></div>
+          <div id="appliedList" class="applied-list empty">적용된 정의가 없습니다.</div>
+        </div>
+      </section>
+
+      <section id="analysisTool" class="panel stage analysis-stage" hidden>
+        <div class="stage-head">
+          <div><span class="eyebrow">READ-ONLY ANALYSIS</span><h1>데이터 분석 도구</h1>
+            <p><b id="analysisConnectionName">연결을 선택하세요</b>에서 SELECT/WITH 쿼리만 제한적으로 실행합니다.</p></div>
+          <button id="closeAnalysisBtn" class="ghost">통합 설정으로 돌아가기</button>
+        </div>
+        <div id="analysisStatus" class="notice neutral">연결된 DB의 스키마를 불러오고 있습니다.</div>
+        <div class="analysis-layout">
+          <aside class="analysis-schema">
+            <div class="analysis-section-head"><div><span class="eyebrow">SCHEMA</span><h2>테이블 탐색</h2></div><button id="refreshAnalysisSchemaBtn" class="ghost small">새로고침</button></div>
+            <label id="analysisDatabaseField"><span>분석 DB</span><select id="analysisDatabase"></select></label>
+            <div id="analysisSchemaList" class="analysis-schema-list empty">스키마를 불러오는 중…</div>
+          </aside>
+          <div class="analysis-workspace">
+            <div class="analysis-section-head">
+              <div><span class="eyebrow">SQL WORKSPACE</span><h2>읽기 전용 쿼리</h2></div>
+              <div class="query-limits">
+                <label><span>최대 행</span><select id="analysisMaxRows"><option>50</option><option selected>100</option><option>200</option><option>500</option></select></label>
+                <label><span>제한 시간</span><select id="analysisTimeout"><option value="2000">2초</option><option value="5000" selected>5초</option><option value="10000">10초</option></select></label>
+              </div>
+            </div>
+            <textarea id="analysisQuery" class="query-editor" spellcheck="false" aria-label="읽기 전용 SQL 쿼리" placeholder="SELECT * FROM table_name"></textarea>
+            <div class="actions query-actions">
+              <span class="keyboard-hint">⌘/Ctrl + Enter 실행 · SELECT/WITH 전용</span>
+              <button id="clearAnalysisBtn" class="ghost">지우기</button>
+              <button id="runAnalysisBtn" class="primary">쿼리 실행</button>
+            </div>
+            <div class="analysis-result-head">
+              <div id="analysisResultSummary" class="metrics compact"></div>
+              <button id="exportAnalysisBtn" class="ghost small" disabled>CSV 다운로드</button>
+            </div>
+            <div id="analysisResult" class="analysis-result empty">쿼리를 실행하면 결과가 여기에 표시됩니다.</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,2 +1,2 @@
-# 개발/테스트 의존성 (런타임은 Python 표준 라이브러리만 사용)
-pytest>=7.0
+-r requirements.txt
+pytest==8.4.1

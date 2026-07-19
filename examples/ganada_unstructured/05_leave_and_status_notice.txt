@@ -1,6 +1,0 @@
-휴직/상태 관리 공지
-
-- status 가 on_leave 인 인원은 복직 예정일을 인사문화실에 등록해야 한다.
-- 휴직 사유: 육아, 질병, 학업, 군복무
-- 복직 시 status 를 active 로 갱신하고 employee_change_history 에 기록한다.
-- 퇴사(resigned) 처리 시 resignation_date 를 반드시 입력한다.

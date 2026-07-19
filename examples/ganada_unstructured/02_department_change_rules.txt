@@ -1,7 +1,0 @@
-부서 변경(전보) 규정
-
-1. 부서 변경 시 employee_department_change_history 에 부서이름(department_name)과
-   변경이전 부서이름(previous_department_name)을 기록한다.
-2. 전보는 소속 부서 manager 승인 후 처리한다.
-3. 근무지(work_location)가 함께 변경되는 경우 employee_work_location_history 에 기록한다.
-4. 연 1회 정기 인사이동, 수시 조직 개편, 본인 요청 전보를 구분해 change_reason 에 기록한다.
