@@ -495,8 +495,10 @@
     list.innerHTML = "";
     tables.forEach(function (table) {
       var label = document.createElement("label");
-      label.className = "table-card";
+      label.className = "table-card" + (table.selected ? " selected" : "");
       var qualified = table.qualified_name || table.name;
+      /* 검색 색인: 테이블명 + 전체 컬럼명 (컬럼 검색 지원) */
+      label.dataset.search = (qualified + " " + table.columns.map(function (c) { return c.name; }).join(" ")).toLowerCase();
       label.innerHTML = "<input class=\"table-check\" type=\"checkbox\" value=\"" + esc(qualified) + "\" " + (table.selected ? "checked" : "") +
         "><div><b>" + esc(qualified) + "</b><small> · " + esc(table.kind) + " · " + esc(table.engine || "") +
         " · rows≈" + (table.estimated_rows == null ? "n/a" : table.estimated_rows.toLocaleString()) +
@@ -510,7 +512,10 @@
         "><input data-field=\"purpose\" placeholder=\"사용 목적 (예: 상품 기준정보 분석)\" value=\"" + esc(table.usage_purpose || "") + "\" " + (table.selected ? "" : "disabled") + "></div>";
       var checkbox = label.querySelector(".table-check");
       checkbox.addEventListener("change", function () {
+        label.classList.toggle("selected", checkbox.checked);
         label.querySelectorAll(".business-fields input").forEach(function (input) { input.disabled = !checkbox.checked; });
+        updateSelectionCount();
+        applyTableFilter();
       });
       list.appendChild(label);
     });
@@ -518,6 +523,33 @@
       list.className = "table-list empty";
       list.textContent = "이 DB에는 사용자 테이블이나 뷰가 없습니다.";
     }
+    updateSelectionCount();
+    applyTableFilter();
+  }
+
+  /* 검색어 + 상태 필터(전체/선택됨/미선택)를 카드 표시에 반영한다. */
+  function applyTableFilter() {
+    var query = ($("tableSearch").value || "").trim().toLowerCase();
+    var mode = state.tableFilter || "all";
+    var shown = 0;
+    document.querySelectorAll("#tableList .table-card").forEach(function (card) {
+      var checked = card.querySelector(".table-check").checked;
+      var matchQuery = !query || (card.dataset.search || "").indexOf(query) !== -1;
+      var matchMode = mode === "all" || (mode === "selected" && checked) || (mode === "unselected" && !checked);
+      var visible = matchQuery && matchMode;
+      card.hidden = !visible;
+      if (visible) shown += 1;
+    });
+    var empty = $("tableFilterEmpty");
+    if (empty) empty.hidden = shown > 0 || !document.querySelectorAll("#tableList .table-card").length;
+  }
+
+  function updateSelectionCount() {
+    var total = document.querySelectorAll("#tableList .table-check").length;
+    var selected = document.querySelectorAll("#tableList .table-check:checked").length;
+    $("selectedCount").textContent = selected;
+    $("totalCount").textContent = total;
+    $("saveBtnCount").textContent = selected;
   }
 
   function selectedDetails() {
@@ -532,14 +564,37 @@
     });
   }
   function selectedNames() { return selectedDetails().map(function (item) { return item.table_name; }); }
+  function applyCheck(input, checked) {
+    if (input.checked === checked) return;
+    input.checked = checked;
+    var card = input.closest(".table-card");
+    card.classList.toggle("selected", checked);
+    card.querySelectorAll(".business-fields input").forEach(function (el) { el.disabled = !checked; });
+  }
   function setAllTables(checked) {
-    document.querySelectorAll("#tableList .table-check").forEach(function (input) {
-      input.checked = checked;
-      input.dispatchEvent(new Event("change"));
+    document.querySelectorAll("#tableList .table-check").forEach(function (input) { applyCheck(input, checked); });
+    updateSelectionCount();
+    applyTableFilter();
+  }
+  function setVisibleTables(checked) {
+    document.querySelectorAll("#tableList .table-card").forEach(function (card) {
+      if (!card.hidden) applyCheck(card.querySelector(".table-check"), checked);
     });
+    updateSelectionCount();
+    applyTableFilter();
   }
   $("selectAllBtn").addEventListener("click", function () { setAllTables(true); });
   $("clearAllBtn").addEventListener("click", function () { setAllTables(false); });
+  $("selectVisibleBtn").addEventListener("click", function () { setVisibleTables(true); });
+  $("tableSearch").addEventListener("input", applyTableFilter);
+  document.querySelectorAll(".table-filters .chip-toggle").forEach(function (button) {
+    button.addEventListener("click", function () {
+      document.querySelectorAll(".table-filters .chip-toggle").forEach(function (b) { b.classList.remove("active"); });
+      button.classList.add("active");
+      state.tableFilter = button.dataset.filter;
+      applyTableFilter();
+    });
+  });
   $("saveSelectionBtn").addEventListener("click", function () {
     var selected = selectedDetails();
     request("/api/connections/" + encodeURIComponent(state.activeId) + "/tables", jsonOptions("PUT", {

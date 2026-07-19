@@ -83,19 +83,34 @@
         <div class="stage-head">
           <div><span class="eyebrow">STEP 3</span><h1>Agent가 사용할 테이블을 선택합니다</h1>
             <p>저장된 선택 범위만 다음 온톨로지 단계에서 사용됩니다.</p></div>
-          <div class="inline-actions"><button id="selectAllBtn" class="ghost small">전체 선택</button><button id="clearAllBtn" class="ghost small">선택 해제</button></div>
         </div>
         <div id="inventoryPanel" class="inventory-panel">
           <div id="serverInfo" class="metrics"></div>
           <div class="inventory-head"><div><span class="eyebrow">DATABASE INVENTORY</span><h2>접근 가능한 DB</h2></div><button id="analyzeDatabasesBtn" class="ghost small">선택 DB 스키마 분석</button></div>
           <div id="databaseInventory" class="database-inventory empty">연결 테스트 후 서버 inventory를 불러옵니다.</div>
         </div>
-        <div class="inventory-head"><div><span class="eyebrow">BUSINESS TABLES</span><h2>업무테이블 지정</h2></div></div>
+        <div class="inventory-head">
+          <div><span class="eyebrow">BUSINESS TABLES</span><h2>업무테이블 지정</h2></div>
+          <div class="table-select-count">사용 선택 <b id="selectedCount">0</b> / <span id="totalCount">0</span></div>
+        </div>
         <div id="schemaSummary" class="metrics"></div>
+        <div class="table-toolbar">
+          <input id="tableSearch" class="table-search" placeholder="테이블·컬럼 검색…" autocomplete="off">
+          <div class="table-filters" role="tablist">
+            <button class="chip-toggle active" data-filter="all">전체</button>
+            <button class="chip-toggle" data-filter="selected">선택됨</button>
+            <button class="chip-toggle" data-filter="unselected">미선택</button>
+          </div>
+          <span class="table-toolbar-spacer"></span>
+          <button id="selectVisibleBtn" class="ghost small">보이는 것 선택</button>
+          <button id="selectAllBtn" class="ghost small">전체 선택</button>
+          <button id="clearAllBtn" class="ghost small">선택 해제</button>
+        </div>
         <div id="tableList" class="table-list empty">연결 테스트 후 스키마를 불러옵니다.</div>
+        <div id="tableFilterEmpty" class="notice neutral" hidden>검색/필터 조건에 맞는 테이블이 없습니다.</div>
         <div class="actions footer-actions">
           <button id="backToProfile" class="ghost">이전</button>
-          <button id="saveSelectionBtn" class="primary">선택 저장 후 계속</button>
+          <button id="saveSelectionBtn" class="primary">선택 <b id="saveBtnCount">0</b>개 저장 후 계속</button>
         </div>
       </section>
 

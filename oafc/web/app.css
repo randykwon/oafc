@@ -86,8 +86,22 @@ input[readonly] { color: #b1bed0; }
 .metric span { color: var(--muted); font-size: 10px; }
 .inline-actions { display: flex; gap: 7px; }
 .table-list { display: grid; gap: 9px; }
-.table-card { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; padding: 14px; border: 1px solid var(--line); background: #0f1a2a; border-radius: 10px; }
-.table-card:has(input:checked) { border-color: #3e7d69; background: #11271f; }
+.table-card { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; padding: 14px; border: 1px solid var(--line); background: #0f1a2a; border-radius: 10px; cursor: pointer; }
+.table-card.selected, .table-card:has(input:checked) { border-color: #3e7d69; background: #11271f; box-shadow: inset 3px 0 0 var(--primary); }
+.table-card[hidden] { display: none; }
+
+/* Step3 테이블 사용체크 툴바 */
+.table-select-count { font-size: 12px; color: var(--muted); }
+.table-select-count b { color: var(--primary); font-size: 15px; }
+.table-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 12px; }
+.table-search { flex: 1 1 220px; min-width: 160px; padding: 9px 12px; background: #0f1a2a;
+  border: 1px solid var(--line); border-radius: 9px; color: var(--text); font-size: 12px; }
+.table-toolbar-spacer { flex: 1; }
+.table-filters { display: flex; gap: 4px; }
+.chip-toggle { padding: 6px 12px; font-size: 11px; border-radius: 999px; border: 1px solid var(--line);
+  background: #101c2d; color: var(--muted); cursor: pointer; }
+.chip-toggle.active { background: var(--primary); border-color: var(--primary); color: #06231a; font-weight: 600; }
+#saveBtnCount { color: inherit; }
 .table-card input { width: 16px; }
 .table-card b { font-size: 13px; }
 .table-card small { color: var(--muted); font-size: 10px; }
