@@ -1272,6 +1272,7 @@ class IntegratorStore:
         "이름": "name", "성명": "name", "상태": "status", "근무지": "location work",
         "제품": "product", "상품": "product", "주문": "order", "고객": "customer",
         "공급": "supplier supply", "수량": "quantity", "금액": "amount", "가격": "price",
+        "카테고리": "category", "분류": "category", "매출": "sales amount revenue",
         "날짜": "date", "나이": "age", "년": "year", "월": "month",
     }
 
@@ -1336,6 +1337,7 @@ class IntegratorStore:
                 df[tok] = df.get(tok, 0) + 1
 
         best, best_score = None, 0.0
+        scores: dict[str, float] = {}
         for ent, toks, ctoks in zip(entities, ent_tokens, core_tokens):
             score = 0.0
             for tok in (q_tokens & toks):
@@ -1343,6 +1345,7 @@ class IntegratorStore:
                 if tok in ctoks:
                     weight *= 1.8  # 테이블 자체 이름에 있으면 강한 신호
                 score += weight
+            scores[ent["table"]] = score
             if score > best_score:
                 best, best_score = ent, score
         if best is None:
@@ -1352,24 +1355,26 @@ class IntegratorStore:
         #    (다단어 라벨 "Department Code" 도 질문 토큰 'department' 로 매칭되도록).
         #    이미 엔티티(테이블)를 특정한 토큰(예: Employee 표의 'employee')은 컬럼을
         #    다시 고르는 신호로 쓰지 않는다 — 그러면 employee_id/no 까지 딸려오기 때문.
-        entity_name_tokens = set(self._words(best["entity"])) | set(self._words(core(best["table"])))
-        col_q_tokens = q_tokens - entity_name_tokens
-        matched_cols = []
-        for attr in best["attributes"]:
-            attr_tokens: set[str] = set()
-            for term in [attr["label"], attr["column"]] + (attr.get("synonyms") or []):
-                attr_tokens |= {w for w in self._words(term) if len(w) >= 2}
-            if attr_tokens & col_q_tokens:
-                matched_cols.append(attr)
+        def matched_columns_for(ent: dict[str, Any]) -> list[dict[str, Any]]:
+            name_tokens = set(self._words(ent["entity"])) | set(self._words(core(ent["table"])))
+            col_q = q_tokens - name_tokens
+            out = []
+            for attr in ent["attributes"]:
+                attr_tokens: set[str] = set()
+                for term in [attr["label"], attr["column"]] + (attr.get("synonyms") or []):
+                    attr_tokens |= {w for w in self._words(term) if len(w) >= 2}
+                if attr_tokens & col_q:
+                    out.append(attr)
+            return out
 
-        table_sql = self._quote_analysis_table(engine, best["table"])
+        matched_cols = matched_columns_for(best)
 
-        # 3) 집계/그룹 의도
+        # 3) 집계/그룹 의도 (테이블과 무관하게 먼저 판단)
         agg = None
         standalone_count = "수" in text.split() or text.rstrip("?！!. ").endswith(" 수")
         if standalone_count or "how many" in low or any(k in low for k in ["몇", "개수", "건수", "count", "얼마나", "명", "number of"]):
             agg = ("COUNT(*)", "건수")
-        elif any(k in low for k in ["합계", "총", "sum", "합"]):
+        elif any(k in low for k in ["합계", "총", "sum", "합", "total"]):
             agg = ("SUM", "합계")
         elif any(k in low for k in ["평균", "average", "avg"]):
             agg = ("AVG", "평균")
@@ -1377,9 +1382,38 @@ class IntegratorStore:
             agg = ("MAX", "최대")
         elif any(k in low for k in ["최소", "min", "가장 작은", "가장 낮은"]):
             agg = ("MIN", "최소")
+        group_requested = "별" in text or any(k in low for k in ["그룹", "group", "each", "per "])
 
+        # 3b) 관계 인식 JOIN — 질문이 승인된 관계로 이어진 두 엔티티에 걸치면
+        #     Semantic Model 의 관계(+Provenance)를 따라 조인 초안을 만든다.
+        def direct_relationship(a_table: str, b_table: str) -> dict[str, Any] | None:
+            for rel in model["relationships"]:
+                if {rel["from_table"], rel["to_table"]} == {a_table, b_table}:
+                    return rel
+            return None
+
+        partner, partner_rel, partner_cols = None, None, []
+        for cand in sorted(entities, key=lambda e: scores.get(e["table"], 0.0), reverse=True):
+            if cand["table"] == best["table"] or scores.get(cand["table"], 0.0) <= 0:
+                continue
+            rel = direct_relationship(best["table"], cand["table"])
+            if not rel:
+                continue
+            cand_cols = matched_columns_for(cand)
+            if cand_cols:
+                partner, partner_rel, partner_cols = cand, rel, cand_cols
+                break
+
+        if partner is not None:
+            result = self._nl_join_draft(engine, best, matched_cols, partner, partner_cols,
+                                         partner_rel, agg, group_requested)
+            result.update({"question": text, "engine": engine, "source": "rule"})
+            return result
+
+        # 4) 단일 테이블 경로
+        table_sql = self._quote_analysis_table(engine, best["table"])
         group_col = None
-        if "별" in text or any(k in low for k in ["그룹", "group", "each", "per "]):
+        if group_requested:
             reserved = matched_cols[:1] if agg else []
             # 질문에 그룹 기준이 명시됐다면(예: "부서별") 그 컬럼을 최우선한다.
             group_col = next((c for c in matched_cols if c not in reserved), None)
@@ -1396,9 +1430,8 @@ class IntegratorStore:
         evidence = {"entity": best["entity"], "table": best["table"],
                     "columns": [c["column"] for c in matched_cols],
                     "intent": (agg[1] if agg else "조회"),
-                    "group_by": group_col["column"] if group_col else None}
+                    "group_by": group_col["column"] if group_col else None, "join": None}
 
-        # 4) SQL 초안 조립
         if agg:
             fn = agg[0]
             if fn == "COUNT(*)":
@@ -1425,6 +1458,87 @@ class IntegratorStore:
             "question": text, "sql": sql, "engine": engine, "source": "rule",
             "evidence": evidence,
             "note": "Semantic Model 매칭으로 생성한 초안입니다. 검토 후 실행하세요.",
+        }
+
+    def _nl_join_draft(self, engine: str, primary: dict[str, Any], primary_cols: list[dict[str, Any]],
+                       partner: dict[str, Any], partner_cols: list[dict[str, Any]],
+                       rel: dict[str, Any], agg: tuple[str, str] | None,
+                       group_requested: bool) -> dict[str, Any]:
+        """승인된 관계를 따라 두 엔티티를 조인하는 읽기 전용 초안을 만든다."""
+        alias = {primary["table"]: "t1", partner["table"]: "t2"}
+        matched_of = {primary["table"]: primary_cols, partner["table"]: partner_cols}
+
+        def qcol(table: str, column: str) -> str:
+            return alias[table] + "." + self._quote_analysis_column(engine, column)
+
+        on = "%s = %s" % (qcol(rel["from_table"], rel["from_column"]),
+                          qcol(rel["to_table"], rel["to_column"]))
+        from_sql = "%s t1 JOIN %s t2 ON %s" % (
+            self._quote_analysis_table(engine, primary["table"]),
+            self._quote_analysis_table(engine, partner["table"]), on)
+
+        # 측정 컬럼(측정형) 과 그룹 차원(분류/식별) 을 두 표에서 고른다.
+        def pick_measure() -> tuple[dict[str, Any], dict[str, Any]] | None:
+            for ent in (primary, partner):
+                m = next((c for c in matched_of[ent["table"]] if c["semantic_type"] == "measure"), None)
+                if m:
+                    return ent, m
+            for ent in (primary, partner):
+                m = next((c for c in ent["attributes"] if c["semantic_type"] == "measure"), None)
+                if m:
+                    return ent, m
+            return None
+
+        def pick_group(exclude: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any]] | None:
+            pairs = [(partner, c) for c in partner_cols] + [(primary, c) for c in primary_cols]
+            pairs = [(e, c) for (e, c) in pairs if c is not exclude]
+            for wanted in ("classification", "identifier", None):
+                for ent, c in pairs:
+                    if wanted is None or c["semantic_type"] == wanted:
+                        return ent, c
+            return None
+
+        columns: list[str] = []
+        group_ev = None
+        if agg:
+            fn = agg[0]
+            measure_pick = None if fn == "COUNT(*)" else pick_measure()
+            measure = "COUNT(*) AS 건수" if fn == "COUNT(*)" else "%s(%s) AS %s" % (
+                fn, qcol(measure_pick[0]["table"], measure_pick[1]["column"]) if measure_pick else "*", agg[1])
+            group_pick = pick_group(measure_pick[1] if measure_pick else None) if group_requested else None
+            if group_pick:
+                gcol = qcol(group_pick[0]["table"], group_pick[1]["column"])
+                sql = "SELECT %s, %s FROM %s GROUP BY %s ORDER BY %s DESC LIMIT 100" % (
+                    gcol, measure, from_sql, gcol, gcol)
+                group_ev = {"entity": group_pick[0]["entity"], "column": group_pick[1]["column"]}
+                columns = [group_pick[1]["column"]]
+            else:
+                sql = "SELECT %s FROM %s LIMIT 100" % (measure, from_sql)
+        else:
+            selects = []
+            for ent, cols in ((primary, primary_cols), (partner, partner_cols)):
+                for c in cols:
+                    selects.append(qcol(ent["table"], c["column"]))
+                    columns.append(c["column"])
+            select_cols = ", ".join(selects[:8]) if selects else "t1.*"
+            sql = "SELECT %s FROM %s LIMIT 100" % (select_cols, from_sql)
+
+        evidence = {
+            "entity": primary["entity"], "table": primary["table"], "columns": columns,
+            "intent": (agg[1] if agg else "조회"),
+            "group_by": group_ev["column"] if group_ev else None,
+            "join": {
+                "entity": partner["entity"], "table": partner["table"],
+                "on": "%s.%s = %s.%s" % (rel["from_table"], rel["from_column"],
+                                         rel["to_table"], rel["to_column"]),
+                "predicate": rel["predicate"], "confidence": rel["confidence"],
+                "provenance": rel.get("provenance"),
+            },
+        }
+        return {
+            "sql": sql, "evidence": evidence,
+            "note": "승인된 관계(%s)를 따라 %s ↔ %s 를 조인한 초안입니다. 검토 후 실행하세요." % (
+                rel["predicate"], primary["entity"], partner["entity"]),
         }
 
     def semantic_model(self, connection_id: str) -> dict[str, Any]:

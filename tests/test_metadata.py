@@ -237,3 +237,43 @@ def test_nl_to_sql_drafts_safe_readonly_query(store, source_root):
 
     with pytest.raises(IntegratorError):
         store.nl_to_sql(profile["id"], "   ")
+
+
+def test_nl_to_sql_joins_related_entities(store, source_root):
+    """질문이 승인된 관계로 이어진 두 엔티티에 걸치면 JOIN 초안을 만든다."""
+    _root, source = source_root
+    profile = store.save_connection({"engine": "sqlite", "name": "Commerce", "location": str(source)})
+    store.test_connection(profile["id"])
+    store.select_tables(profile["id"], [
+        {"table_name": "products", "business_domain": "catalog", "usage_purpose": "제품"},
+        {"table_name": "orders", "business_domain": "sales", "usage_purpose": "주문"},
+    ])
+    store.apply_ontology(profile["id"], store.ontology_suggestions(profile["id"]))
+
+    # 승인된 관계가 없으면 조인하지 않는다(단일 테이블 초안).
+    before = store.nl_to_sql(profile["id"], "카테고리별 주문 수량 합계")
+    assert before["evidence"]["join"] is None
+
+    # 물리 FK(orders.product_id → products.product_id)를 승인한다.
+    fk = next(r for r in store.discover_relationships(profile["id"])["relationships"]
+              if r["from_table"] == "orders" and r["to_table"] == "products")
+    store.save_relationships(profile["id"], [{
+        "from_table": fk["from_table"], "from_column": fk["from_column"],
+        "to_table": fk["to_table"], "to_column": fk["to_column"],
+        "predicate": fk["predicate"], "method": fk["method"],
+        "confidence": fk["confidence"], "evidence": fk["evidence"], "status": "approved",
+    }])
+
+    draft = store.nl_to_sql(profile["id"], "카테고리별 주문 수량 합계")
+    join = draft["evidence"]["join"]
+    assert join is not None
+    assert join["table"] == "products"
+    assert join["on"] == "orders.product_id = products.product_id"
+    assert join["provenance"]["validated_by"] == "user"  # Provenance 유지
+    assert "JOIN" in draft["sql"]
+    assert draft["evidence"]["group_by"] == "category"  # 그룹 차원은 관계 상대 표에서
+    assert "SUM(" in draft["sql"]
+    # 읽기 전용 검증기 통과 + 실제 실행
+    assert store._validated_analysis_sql(draft["sql"])
+    result = store.analyze_query(profile["id"], draft["sql"])
+    assert "category" in result["columns"]

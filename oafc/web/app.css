@@ -225,6 +225,7 @@ button.danger:hover:not(:disabled) { border-color: var(--bad); background: rgba(
 .nlq-evidence { margin-top: 11px; padding-top: 10px; border-top: 1px dashed var(--line); }
 .nlq-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .nlq-chip { padding: 3px 9px; border-radius: 999px; background: var(--accent-soft, rgba(90,120,255,0.12)); color: var(--accent, #5a78ff); font-size: 10px; }
+.nlq-chip.join { background: rgba(46,204,113,0.14); color: #2ecc71; }
 .nlq-note { margin: 8px 0 0; color: var(--muted); font-size: 10px; }
 .nlq-hint { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
 .query-editor { min-height: 180px; margin-top: 16px; resize: vertical; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; tab-size: 2; }

@@ -1050,6 +1050,11 @@
         var parts = [];
         if (ev.entity) parts.push('<span class="nlq-chip">엔티티 · ' + esc(ev.entity) + "</span>");
         if (ev.table) parts.push('<span class="nlq-chip">테이블 · ' + esc(ev.table) + "</span>");
+        if (ev.join) {
+          parts.push('<span class="nlq-chip join">조인 · ' + esc(ev.join.entity) +
+            " (신뢰도 " + Math.round((ev.join.confidence || 0) * 100) + "%)</span>");
+          parts.push('<span class="nlq-chip join">ON · ' + esc(ev.join.on) + "</span>");
+        }
         if (ev.intent) parts.push('<span class="nlq-chip">의도 · ' + esc(ev.intent) + "</span>");
         if (ev.group_by) parts.push('<span class="nlq-chip">그룹 · ' + esc(ev.group_by) + "</span>");
         if (Array.isArray(ev.columns) && ev.columns.length) {
