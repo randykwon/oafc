@@ -111,3 +111,28 @@ def test_mysql_server_inventory_schema_and_business_scope(tmp_path):
     assert {item["table_name"] for item in suggestions} == {"analytics.events"}
     assert suggestions[0]["semantic_type"] == "behavior"
     store.close_thread_connection()
+
+
+def test_relationship_discovery_physical_and_inferred(store, source_root):
+    """Data Knowledge Builder: 물리 FK 는 confidence 1.0, 추론 관계는 다중 신호로 산출."""
+    _root, source = source_root
+    profile = store.save_connection({"engine": "sqlite", "name": "Commerce", "location": str(source)})
+    assert store.test_connection(profile["id"])["connected"] is True
+
+    result = store.discover_relationships(profile["id"])
+    assert result["summary"]["entity_count"] == 3          # products, orders, product_titles
+    rels = result["relationships"]
+    assert rels, "expected at least one relationship"
+
+    # 물리 FK: orders.product_id -> products.product_id
+    fk = [r for r in rels if r["method"] == "physical_fk"]
+    assert fk and fk[0]["confidence"] == 1.0
+    assert fk[0]["from_table"] == "orders" and fk[0]["to_table"] == "products"
+    assert fk[0]["predicate"] == "belongs_to"
+    assert "Orders belongs_to Products" == fk[0]["label"]
+
+    # 모든 관계는 evidence 와 0~1 confidence 를 가진다
+    assert all(r["evidence"] for r in rels)
+    assert all(0.0 <= r["confidence"] <= 1.0 for r in rels)
+    # confidence 내림차순 정렬
+    assert [r["confidence"] for r in rels] == sorted([r["confidence"] for r in rels], reverse=True)

@@ -909,6 +909,155 @@ class IntegratorStore:
         words = cls._words(value.split(".")[-1])
         return " ".join(word.capitalize() for word in words) or value
 
+    # -- Data Knowledge Builder: Relationship Discovery --------------------
+    # 물리 FK 만이 아니라 컬럼명 유사도, 데이터 타입 호환, 값 중첩(SQLite)을
+    # 종합해 테이블 간 관계 후보를 발견하고 Confidence Score 를 부여한다.
+
+    @staticmethod
+    def _type_category(data_type: str) -> str:
+        upper = (data_type or "").upper()
+        if any(token in upper for token in ("INT", "SERIAL", "BIGINT")): return "integer"
+        if any(token in upper for token in ("REAL", "FLOAT", "DOUBLE", "DEC", "NUM")): return "number"
+        if any(token in upper for token in ("DATE", "TIME")): return "temporal"
+        if any(token in upper for token in ("BOOL",)): return "boolean"
+        if any(token in upper for token in ("CHAR", "TEXT", "CLOB", "STRING", "UUID")): return "text"
+        return "other"
+
+    @classmethod
+    def _name_similarity(cls, from_column: str, to_table: str, to_column: str) -> tuple[float, str]:
+        """컬럼명 유사도 신호. (score 0~1, 근거 텍스트)"""
+        col = from_column.lower()
+        pk = to_column.lower()
+        table_words = cls._words(to_table.split(".")[-1])
+        singular = table_words[-1] if table_words else ""
+        if col == pk and col not in ("id", "code", "cd", "no", "key"):
+            return 1.0, "동일 컬럼명 '%s'" % from_column
+        # {table}_id / {table}_cd / {table}id 패턴
+        for suffix in ("_id", "_cd", "_code", "_no", "_key", "id", "code"):
+            if singular and col == singular + suffix:
+                return 0.9, "'%s' 가 %s 의 식별자 패턴" % (from_column, to_table.split(".")[-1])
+        if col == pk:
+            return 0.6, "공통 키 컬럼명 '%s'" % from_column
+        from_words = set(cls._words(from_column))
+        to_words = set(cls._words(to_table.split(".")[-1]) + cls._words(to_column))
+        if from_words and to_words:
+            jaccard = len(from_words & to_words) / float(len(from_words | to_words))
+            if jaccard >= 0.5:
+                return round(jaccard, 2), "컬럼/테이블 용어 유사(%.0f%%)" % (jaccard * 100)
+        return 0.0, ""
+
+    def _sqlite_value_overlap(self, path: Path, from_table: str, from_col: str,
+                              to_table: str, to_col: str) -> float | None:
+        """SQLite 읽기 전용으로 from_col 값이 to_col 에 포함되는 비율(0~1)."""
+        fq = self._sqlite_identifier(from_table)
+        tq = self._sqlite_identifier(to_table)
+        fc = self._sqlite_identifier(from_col)
+        tc = self._sqlite_identifier(to_col)
+        try:
+            with self._source_connection(path) as conn:
+                sample = conn.execute(
+                    "SELECT %s AS v FROM %s WHERE %s IS NOT NULL LIMIT 500" % (fc, fq, fc)).fetchall()
+                values = [r["v"] for r in sample]
+                if not values:
+                    return None
+                distinct = list(dict.fromkeys(values))
+                placeholders = ",".join("?" * len(distinct))
+                matched = conn.execute(
+                    "SELECT COUNT(DISTINCT %s) AS c FROM %s WHERE %s IN (%s)" % (tc, tq, tc, placeholders),
+                    tuple(distinct)).fetchone()["c"]
+                return round(matched / float(len(distinct)), 3) if distinct else None
+        except Exception:
+            return None
+
+    def _predicate(self, to_table_pks: list[str], to_column: str) -> str:
+        return "belongs_to" if to_table_pks == [to_column] else "references"
+
+    def discover_relationships(self, connection_id: str) -> dict[str, Any]:
+        """선택된(없으면 전체) 테이블에 대해 물리 FK + 추론 관계를 발견한다."""
+        profile = self.get_connection(connection_id)
+        selected = set(self.selected_tables(connection_id))
+        databases = (list(dict.fromkeys(name.split(".", 1)[0] for name in selected if "." in name)) or None
+                     if profile["engine"] == "mysql" else None)
+        schema = self.schema(connection_id, databases)
+        tables = schema["tables"]
+        scope = [t for t in tables if not selected or t["qualified_name"] in selected]
+        by_name = {t["qualified_name"]: t for t in scope}
+        pk_cols = {t["qualified_name"]: [c["name"] for c in t["columns"] if c["primary_key"]] for t in scope}
+        col_type = {(t["qualified_name"], c["name"]): c["type"]
+                    for t in scope for c in t["columns"]}
+        path = self._allowed_source(profile["location"]) if profile["engine"] == "sqlite" else None
+
+        def record(ft, fc, tt, tc, confidence, method, evidence):
+            return {
+                "from_table": ft, "from_column": fc, "to_table": tt, "to_column": tc,
+                "from_entity": self._label(ft), "to_entity": self._label(tt),
+                "predicate": self._predicate(pk_cols.get(tt, []), tc),
+                "label": "%s %s %s" % (self._label(ft), self._predicate(pk_cols.get(tt, []), tc), self._label(tt)),
+                "confidence": round(min(confidence, 1.0), 3), "method": method, "evidence": evidence,
+            }
+
+        results = []
+        fk_pairs = set()
+        for rel in schema["relationships"]:
+            ft, fc, tt, tc = rel["from_table"], rel["from_column"], rel["to_table"], rel["to_column"]
+            if ft in by_name or tt in by_name:
+                fk_pairs.add((ft, fc, tt, tc))
+                results.append(record(ft, fc, tt, tc, 1.0, "physical_fk", ["물리적 외래키 정의"]))
+
+        seen = set()
+        for src in scope:
+            st = src["qualified_name"]
+            for col in src["columns"]:
+                cname = col["name"]
+                if col["primary_key"]:
+                    continue
+                for dt, pks in pk_cols.items():
+                    if dt == st or not pks:
+                        continue
+                    for pk in pks:
+                        if (st, cname, dt, pk) in fk_pairs or (st, cname, dt, pk) in seen:
+                            continue
+                        name_score, name_reason = self._name_similarity(cname, dt, pk)
+                        if name_score < 0.3:
+                            continue  # 이름 신호가 약하면 후보에서 제외 (조합 폭발 방지)
+                        evidence = [name_reason]
+                        confidence = 0.45 * name_score
+                        # 데이터 타입 호환
+                        if self._type_category(col_type.get((st, cname), "")) == \
+                                self._type_category(col_type.get((dt, pk), "")):
+                            confidence += 0.18
+                            evidence.append("데이터 타입 호환")
+                        # 값 중첩 (SQLite 한정): 실제 값이 겹치면 강한 신호,
+                        # 겹치지 않으면 관계 반증으로 감점한다.
+                        if path is not None and name_score >= 0.5:
+                            overlap = self._sqlite_value_overlap(
+                                path, st.split(".")[-1], cname, dt.split(".")[-1], pk)
+                            if overlap is not None:
+                                if overlap <= 0.001:
+                                    confidence *= 0.35
+                                    evidence.append("값 중첩 0% (관계 반증)")
+                                else:
+                                    confidence += 0.4 * overlap
+                                    evidence.append("값 중첩 %.0f%%" % (overlap * 100))
+                        if confidence >= 0.4:
+                            seen.add((st, cname, dt, pk))
+                            results.append(record(st, cname, dt, pk, confidence, "inferred", evidence))
+
+        results.sort(key=lambda r: (-r["confidence"], r["from_table"], r["from_column"]))
+        entities = [{
+            "entity": self._label(t["qualified_name"]), "table": t["qualified_name"],
+            "primary_keys": pk_cols[t["qualified_name"]], "column_count": len(t["columns"]),
+        } for t in scope]
+        return {
+            "connection": profile, "entities": entities, "relationships": results,
+            "summary": {
+                "entity_count": len(entities),
+                "physical": sum(1 for r in results if r["method"] == "physical_fk"),
+                "inferred": sum(1 for r in results if r["method"] == "inferred"),
+                "high_confidence": sum(1 for r in results if r["confidence"] >= 0.7),
+            },
+        }
+
     def ontology_suggestions(self, connection_id: str) -> list[dict[str, Any]]:
         selection_details = {item["table_name"]: item for item in self.selected_table_details(connection_id)}
         if not selection_details:

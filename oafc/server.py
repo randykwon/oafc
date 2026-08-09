@@ -164,7 +164,7 @@ class IntegratorHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _route(path: str) -> tuple[str | None, str | None]:
-        match = re.fullmatch(r"/api/connections/([0-9a-fA-F-]+)(?:/(test|inventory|schema|tables|ontology|ontology/suggest|ontology/apply|analysis/query))?", path)
+        match = re.fullmatch(r"/api/connections/([0-9a-fA-F-]+)(?:/(test|inventory|schema|tables|relationships|ontology|ontology/suggest|ontology/apply|analysis/query))?", path)
         return match.groups() if match else (None, None)
 
     def _dispatch(self, callback) -> None:
@@ -212,6 +212,8 @@ class IntegratorHandler(BaseHTTPRequestHandler):
                 self._json(store.schema(connection_id, databases))
             elif action == "tables":
                 self._json({"tables": store.selected_table_details(connection_id)})
+            elif action == "relationships":
+                self._json(store.discover_relationships(connection_id))
             elif action == "ontology":
                 self._json({"definitions": store.ontology(connection_id)})
             else:

@@ -610,6 +610,59 @@
       .catch(function (error) { toast(error.message); });
   });
 
+  /* -- Relationship Discovery (Data Knowledge Builder) -- */
+  function confidenceClass(score) {
+    return score >= 0.7 ? "high" : score >= 0.5 ? "mid" : "low";
+  }
+  function renderRelationships(data) {
+    var s = data.summary || {};
+    $("relationshipSummary").innerHTML =
+      "<div class=\"metric\"><b>" + (s.entity_count || 0) + "</b><span>엔티티</span></div>" +
+      "<div class=\"metric\"><b>" + (s.physical || 0) + "</b><span>물리 FK</span></div>" +
+      "<div class=\"metric\"><b>" + (s.inferred || 0) + "</b><span>추론 관계</span></div>" +
+      "<div class=\"metric\"><b>" + (s.high_confidence || 0) + "</b><span>고신뢰(≥0.7)</span></div>";
+    var list = $("relationshipList");
+    var rels = data.relationships || [];
+    if (!rels.length) {
+      list.className = "relationship-list empty";
+      list.textContent = "발견된 관계가 없습니다. 테이블을 더 선택하거나 스키마를 확인하세요.";
+      return;
+    }
+    list.className = "relationship-list";
+    list.innerHTML = rels.map(function (r) {
+      var pct = Math.round(r.confidence * 100);
+      var filled = Math.round(r.confidence * 10);
+      var pips = "";
+      for (var i = 0; i < 10; i += 1) pips += "<i class=\"pip" + (i < filled ? " on" : "") + "\"></i>";
+      return "<div class=\"relationship-row " + confidenceClass(r.confidence) + "\">" +
+        "<div class=\"rel-head\"><b>" + esc(r.from_entity) + "</b> <span class=\"rel-pred\">" +
+        esc(r.predicate) + "</span> <b>" + esc(r.to_entity) + "</b>" +
+        "<span class=\"rel-method " + esc(r.method) + "\">" + (r.method === "physical_fk" ? "물리 FK" : "추론") + "</span></div>" +
+        "<div class=\"rel-cols\">" + esc(r.from_table) + "." + esc(r.from_column) + " → " +
+        esc(r.to_table) + "." + esc(r.to_column) + "</div>" +
+        "<div class=\"rel-conf\"><div class=\"conf-pips\">" + pips + "</div><b>" + pct + "%</b></div>" +
+        "<div class=\"rel-evidence\">" + (r.evidence || []).map(function (e) {
+          return "<span class=\"chip\">" + esc(e) + "</span>"; }).join("") + "</div></div>";
+    }).join("");
+  }
+  $("discoverRelBtn").addEventListener("click", function () {
+    if (!state.activeId) { toast("먼저 연결을 선택하세요."); return; }
+    var button = this;
+    button.disabled = true;
+    button.textContent = "발견 중…";
+    $("relationshipList").className = "relationship-list empty";
+    $("relationshipList").textContent = "컬럼명·데이터 타입·값 중첩을 분석하는 중…";
+    request("/api/connections/" + encodeURIComponent(state.activeId) + "/relationships")
+      .then(function (data) { renderRelationships(data); })
+      .catch(function (error) {
+        $("relationshipList").textContent = error.message;
+        toast(error.message);
+      }).finally(function () {
+        button.disabled = false;
+        button.textContent = "관계 다시 발견";
+      });
+  });
+
   $("suggestBtn").addEventListener("click", function () {
     var button = this;
     button.disabled = true;

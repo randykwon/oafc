@@ -108,6 +108,15 @@
         </div>
         <div id="tableList" class="table-list empty">연결 테스트 후 스키마를 불러옵니다.</div>
         <div id="tableFilterEmpty" class="notice neutral" hidden>검색/필터 조건에 맞는 테이블이 없습니다.</div>
+
+        <div class="inventory-head">
+          <div><span class="eyebrow">SEMANTIC MODEL</span><h2>관계 발견 · Confidence</h2>
+            <p>물리 FK 만이 아니라 컬럼명 유사도·데이터 타입·값 중첩을 종합해 테이블 간 관계를 추론합니다.</p></div>
+          <button id="discoverRelBtn" class="ghost small">관계 발견</button>
+        </div>
+        <div id="relationshipSummary" class="metrics"></div>
+        <div id="relationshipList" class="relationship-list empty">‘관계 발견’을 실행하면 추론된 관계가 Confidence Score와 함께 표시됩니다.</div>
+
         <div class="actions footer-actions">
           <button id="backToProfile" class="ghost">이전</button>
           <button id="saveSelectionBtn" class="primary">선택 <b id="saveBtnCount">0</b>개 저장 후 계속</button>

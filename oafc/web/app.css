@@ -107,6 +107,28 @@ input[readonly] { color: #b1bed0; }
 .table-card small { color: var(--muted); font-size: 10px; }
 .column-chips { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
 .chip { color: #aebed2; background: #17263b; border: 1px solid #263c59; border-radius: 999px; padding: 3px 7px; font-size: 9px; }
+
+/* Relationship Discovery (Data Knowledge Builder) */
+.relationship-list { display: grid; gap: 9px; }
+.relationship-list.empty { color: var(--muted); font-size: 12px; padding: 14px; border: 1px dashed var(--line); border-radius: 10px; }
+.relationship-row { padding: 12px 14px; border: 1px solid var(--line); background: #0f1a2a; border-radius: 10px;
+  border-left-width: 3px; }
+.relationship-row.high { border-left-color: #3ecf8e; }
+.relationship-row.mid { border-left-color: #f5b04d; }
+.relationship-row.low { border-left-color: #6b7aa5; }
+.rel-head { display: flex; align-items: center; gap: 6px; font-size: 13px; flex-wrap: wrap; }
+.rel-pred { color: var(--primary); font-size: 11px; padding: 1px 7px; background: #101c2d; border-radius: 999px; }
+.rel-method { margin-left: auto; font-size: 9px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.rel-method.physical_fk { color: #3ecf8e; border-color: #2a5c46; }
+.rel-cols { color: var(--muted); font-size: 10px; margin: 5px 0; font-family: ui-monospace, Menlo, monospace; }
+.rel-conf { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.rel-conf b { font-size: 11px; color: var(--text); min-width: 34px; }
+.conf-pips { display: flex; gap: 3px; }
+.conf-pips .pip { width: 14px; height: 6px; border-radius: 2px; background: #17263b; }
+.relationship-row.high .pip.on { background: #3ecf8e; }
+.relationship-row.mid .pip.on { background: #f5b04d; }
+.relationship-row.low .pip.on { background: #6b7aa5; }
+.rel-evidence { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
 .ontology-list { display: grid; gap: 10px; margin-top: 20px; max-height: 560px; overflow: auto; padding-right: 4px; }
 .ontology-row { display: grid; grid-template-columns: 120px minmax(130px, .7fr) minmax(200px, 1.4fr) minmax(140px, .8fr); gap: 8px; padding: 12px; border: 1px solid var(--line); background: #0e1827; border-radius: 10px; }
 .ontology-row .target { color: var(--blue); font-size: 10px; overflow-wrap: anywhere; padding-top: 10px; }
