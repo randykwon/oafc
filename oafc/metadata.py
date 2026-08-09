@@ -165,6 +165,23 @@ class IntegratorStore:
                     UNIQUE(connection_id, table_name, column_name, target_type),
                     FOREIGN KEY (connection_id) REFERENCES connections(id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS saved_relationships (
+                    id TEXT PRIMARY KEY,
+                    connection_id TEXT NOT NULL,
+                    from_table TEXT NOT NULL,
+                    from_column TEXT NOT NULL,
+                    to_table TEXT NOT NULL,
+                    to_column TEXT NOT NULL,
+                    predicate TEXT NOT NULL DEFAULT 'references',
+                    method TEXT NOT NULL DEFAULT 'inferred',
+                    confidence REAL NOT NULL DEFAULT 0.0,
+                    evidence TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'approved',
+                    validated_by TEXT NOT NULL DEFAULT 'user',
+                    validated_at TEXT NOT NULL,
+                    UNIQUE(connection_id, from_table, from_column, to_table, to_column),
+                    FOREIGN KEY (connection_id) REFERENCES connections(id) ON DELETE CASCADE
+                );
             """)
             self._ensure_columns(conn, "connections", {
                 "host": "TEXT NOT NULL DEFAULT ''", "port": "INTEGER NOT NULL DEFAULT 0",
@@ -1043,6 +1060,19 @@ class IntegratorStore:
                             seen.add((st, cname, dt, pk))
                             results.append(record(st, cname, dt, pk, confidence, "inferred", evidence))
 
+        # 저장된(승인/제외) 관계 상태를 병합한다 (Human Validation + Provenance).
+        saved = {self._relationship_key(r): r for r in self.saved_relationships(connection_id)}
+        for r in results:
+            record_saved = saved.pop(self._relationship_key(r), None)
+            r["status"] = record_saved["status"] if record_saved else "candidate"
+            r["validated_at"] = record_saved["validated_at"] if record_saved else None
+        # 발견되지 않았지만 이전에 승인된 관계도 목록에 유지한다.
+        for leftover in saved.values():
+            leftover["from_entity"] = self._label(leftover["from_table"])
+            leftover["to_entity"] = self._label(leftover["to_table"])
+            leftover["label"] = "%s %s %s" % (leftover["from_entity"], leftover["predicate"], leftover["to_entity"])
+            results.append(leftover)
+
         results.sort(key=lambda r: (-r["confidence"], r["from_table"], r["from_column"]))
         entities = [{
             "entity": self._label(t["qualified_name"]), "table": t["qualified_name"],
@@ -1055,8 +1085,73 @@ class IntegratorStore:
                 "physical": sum(1 for r in results if r["method"] == "physical_fk"),
                 "inferred": sum(1 for r in results if r["method"] == "inferred"),
                 "high_confidence": sum(1 for r in results if r["confidence"] >= 0.7),
+                "approved": sum(1 for r in results if r.get("status") == "approved"),
             },
         }
+
+    @staticmethod
+    def _relationship_key(rel: dict[str, Any]) -> tuple[str, str, str, str]:
+        return (rel["from_table"], rel["from_column"], rel["to_table"], rel["to_column"])
+
+    def saved_relationships(self, connection_id: str) -> list[dict[str, Any]]:
+        self.get_connection(connection_id)
+        rows = self._connection().execute(
+            "SELECT from_table,from_column,to_table,to_column,predicate,method,confidence,"
+            "evidence,status,validated_by,validated_at FROM saved_relationships "
+            "WHERE connection_id=? ORDER BY confidence DESC", (connection_id,)).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["evidence"] = json.loads(item["evidence"]) if item["evidence"] else []
+            except (ValueError, TypeError):
+                item["evidence"] = []
+            out.append(item)
+        return out
+
+    def save_relationships(self, connection_id: str, decisions: list[Any]) -> list[dict[str, Any]]:
+        """관계 검토 결정을 저장한다. 각 항목 status: approved | rejected (삭제)."""
+        if not isinstance(decisions, list):
+            raise IntegratorError("relationships must be an array")
+        self.get_connection(connection_id)
+        now = self._now()
+        with self._write_lock:
+            conn = self._connection()
+            for entry in decisions:
+                if not isinstance(entry, dict):
+                    raise IntegratorError("each relationship decision must be an object")
+                required = ("from_table", "from_column", "to_table", "to_column")
+                if not all(str(entry.get(field) or "") for field in required):
+                    raise IntegratorError("relationship requires from/to table and column")
+                status = str(entry.get("status") or "approved")
+                if status not in {"approved", "rejected"}:
+                    raise IntegratorError("relationship status must be approved or rejected")
+                key = tuple(str(entry[field]) for field in required)
+                if status == "rejected":
+                    conn.execute(
+                        "DELETE FROM saved_relationships WHERE connection_id=? AND from_table=? "
+                        "AND from_column=? AND to_table=? AND to_column=?", (connection_id, *key))
+                    continue
+                evidence = entry.get("evidence") or []
+                if not isinstance(evidence, list):
+                    evidence = [str(evidence)]
+                conn.execute("""
+                    INSERT INTO saved_relationships
+                        (id,connection_id,from_table,from_column,to_table,to_column,
+                         predicate,method,confidence,evidence,status,validated_by,validated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(connection_id,from_table,from_column,to_table,to_column)
+                    DO UPDATE SET predicate=excluded.predicate,method=excluded.method,
+                        confidence=excluded.confidence,evidence=excluded.evidence,
+                        status=excluded.status,validated_by=excluded.validated_by,
+                        validated_at=excluded.validated_at
+                """, (str(uuid.uuid4()), connection_id, *key,
+                      str(entry.get("predicate") or "references"),
+                      str(entry.get("method") or "inferred"),
+                      float(entry.get("confidence") or 0.0),
+                      json.dumps(evidence, ensure_ascii=False), "approved", "user", now))
+            conn.commit()
+        return self.saved_relationships(connection_id)
 
     def ontology_suggestions(self, connection_id: str) -> list[dict[str, Any]]:
         selection_details = {item["table_name"]: item for item in self.selected_table_details(connection_id)}

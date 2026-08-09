@@ -129,6 +129,13 @@ input[readonly] { color: #b1bed0; }
 .relationship-row.mid .pip.on { background: #f5b04d; }
 .relationship-row.low .pip.on { background: #6b7aa5; }
 .rel-evidence { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.rel-status { font-size: 9px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.rel-status.approved { color: #3ecf8e; border-color: #2a5c46; background: #11271f; }
+.rel-status.rejected { color: #f06565; border-color: #5c2a2a; }
+.relationship-row.status-approved { background: #10221a; }
+.relationship-row.status-rejected { opacity: .55; }
+.rel-actions { display: flex; gap: 6px; margin-top: 8px; }
+.rel-actions button { font-size: 10px; }
 .ontology-list { display: grid; gap: 10px; margin-top: 20px; max-height: 560px; overflow: auto; padding-right: 4px; }
 .ontology-row { display: grid; grid-template-columns: 120px minmax(130px, .7fr) minmax(200px, 1.4fr) minmax(140px, .8fr); gap: 8px; padding: 12px; border: 1px solid var(--line); background: #0e1827; border-radius: 10px; }
 .ontology-row .target { color: var(--blue); font-size: 10px; overflow-wrap: anywhere; padding-top: 10px; }

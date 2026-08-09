@@ -615,35 +615,72 @@
     return score >= 0.7 ? "high" : score >= 0.5 ? "mid" : "low";
   }
   function renderRelationships(data) {
+    state.relationships = data.relationships || [];
     var s = data.summary || {};
     $("relationshipSummary").innerHTML =
       "<div class=\"metric\"><b>" + (s.entity_count || 0) + "</b><span>엔티티</span></div>" +
       "<div class=\"metric\"><b>" + (s.physical || 0) + "</b><span>물리 FK</span></div>" +
       "<div class=\"metric\"><b>" + (s.inferred || 0) + "</b><span>추론 관계</span></div>" +
-      "<div class=\"metric\"><b>" + (s.high_confidence || 0) + "</b><span>고신뢰(≥0.7)</span></div>";
+      "<div class=\"metric\"><b>" + (s.approved || 0) + "</b><span>승인됨</span></div>";
     var list = $("relationshipList");
-    var rels = data.relationships || [];
+    var rels = state.relationships;
     if (!rels.length) {
       list.className = "relationship-list empty";
       list.textContent = "발견된 관계가 없습니다. 테이블을 더 선택하거나 스키마를 확인하세요.";
       return;
     }
     list.className = "relationship-list";
-    list.innerHTML = rels.map(function (r) {
+    list.innerHTML = "";
+    rels.forEach(function (r, index) {
       var pct = Math.round(r.confidence * 100);
       var filled = Math.round(r.confidence * 10);
       var pips = "";
       for (var i = 0; i < 10; i += 1) pips += "<i class=\"pip" + (i < filled ? " on" : "") + "\"></i>";
-      return "<div class=\"relationship-row " + confidenceClass(r.confidence) + "\">" +
+      var status = r.status || "candidate";
+      var row = document.createElement("div");
+      row.className = "relationship-row " + confidenceClass(r.confidence) + " status-" + status;
+      row.innerHTML =
         "<div class=\"rel-head\"><b>" + esc(r.from_entity) + "</b> <span class=\"rel-pred\">" +
         esc(r.predicate) + "</span> <b>" + esc(r.to_entity) + "</b>" +
+        "<span class=\"rel-status " + status + "\">" +
+        (status === "approved" ? "승인됨" : status === "rejected" ? "제외" : "후보") + "</span>" +
         "<span class=\"rel-method " + esc(r.method) + "\">" + (r.method === "physical_fk" ? "물리 FK" : "추론") + "</span></div>" +
         "<div class=\"rel-cols\">" + esc(r.from_table) + "." + esc(r.from_column) + " → " +
         esc(r.to_table) + "." + esc(r.to_column) + "</div>" +
         "<div class=\"rel-conf\"><div class=\"conf-pips\">" + pips + "</div><b>" + pct + "%</b></div>" +
         "<div class=\"rel-evidence\">" + (r.evidence || []).map(function (e) {
-          return "<span class=\"chip\">" + esc(e) + "</span>"; }).join("") + "</div></div>";
-    }).join("");
+          return "<span class=\"chip\">" + esc(e) + "</span>"; }).join("") + "</div>" +
+        "<div class=\"rel-actions\">" +
+        "<button class=\"ghost small\" data-decide=\"approved\">승인</button>" +
+        "<button class=\"ghost small\" data-decide=\"rejected\">제외</button></div>";
+      row.querySelector("[data-decide=approved]").addEventListener("click", function () { decideRelationship(index, "approved"); });
+      row.querySelector("[data-decide=rejected]").addEventListener("click", function () { decideRelationship(index, "rejected"); });
+      list.appendChild(row);
+    });
+  }
+  function decideRelationship(index, status) {
+    var r = (state.relationships || [])[index];
+    if (!r) return;
+    var payload = {
+      from_table: r.from_table, from_column: r.from_column,
+      to_table: r.to_table, to_column: r.to_column,
+      predicate: r.predicate, method: r.method, confidence: r.confidence,
+      evidence: r.evidence, status: status
+    };
+    request("/api/connections/" + encodeURIComponent(state.activeId) + "/relationships",
+      jsonOptions("PUT", { relationships: [payload] }))
+      .then(function () {
+        toast(status === "approved" ? "관계를 승인해 Semantic Model 에 저장했습니다." : "관계를 제외했습니다.");
+        return loadRelationships();
+      }).catch(function (error) { toast(error.message); });
+  }
+  function loadRelationships() {
+    return request("/api/connections/" + encodeURIComponent(state.activeId) + "/relationships")
+      .then(function (data) { renderRelationships(data); })
+      .catch(function (error) {
+        $("relationshipList").textContent = error.message;
+        toast(error.message);
+      });
   }
   $("discoverRelBtn").addEventListener("click", function () {
     if (!state.activeId) { toast("먼저 연결을 선택하세요."); return; }
@@ -652,15 +689,10 @@
     button.textContent = "발견 중…";
     $("relationshipList").className = "relationship-list empty";
     $("relationshipList").textContent = "컬럼명·데이터 타입·값 중첩을 분석하는 중…";
-    request("/api/connections/" + encodeURIComponent(state.activeId) + "/relationships")
-      .then(function (data) { renderRelationships(data); })
-      .catch(function (error) {
-        $("relationshipList").textContent = error.message;
-        toast(error.message);
-      }).finally(function () {
-        button.disabled = false;
-        button.textContent = "관계 다시 발견";
-      });
+    loadRelationships().finally(function () {
+      button.disabled = false;
+      button.textContent = "관계 다시 발견";
+    });
   });
 
   $("suggestBtn").addEventListener("click", function () {

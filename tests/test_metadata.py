@@ -136,3 +136,33 @@ def test_relationship_discovery_physical_and_inferred(store, source_root):
     assert all(0.0 <= r["confidence"] <= 1.0 for r in rels)
     # confidence 내림차순 정렬
     assert [r["confidence"] for r in rels] == sorted([r["confidence"] for r in rels], reverse=True)
+
+
+def test_relationship_approval_persists_with_provenance(store, source_root):
+    """관계 승인/제외 저장: Provenance(validated_at) 기록, 재발견 시 status 병합."""
+    _root, source = source_root
+    profile = store.save_connection({"engine": "sqlite", "name": "Commerce", "location": str(source)})
+    assert store.test_connection(profile["id"])["connected"] is True
+
+    fk = [r for r in store.discover_relationships(profile["id"])["relationships"]
+          if r["method"] == "physical_fk"][0]
+    assert fk["status"] == "candidate"
+
+    decision = {k: fk[k] for k in ("from_table", "from_column", "to_table", "to_column",
+                                   "predicate", "method", "confidence", "evidence")}
+    decision["status"] = "approved"
+    saved = store.save_relationships(profile["id"], [decision])
+    assert len(saved) == 1
+    assert saved[0]["status"] == "approved"
+    assert saved[0]["validated_at"] and saved[0]["validated_by"] == "user"
+
+    # 재발견 시 승인 상태가 병합된다
+    again = store.discover_relationships(profile["id"])
+    assert again["summary"]["approved"] == 1
+    approved = [r for r in again["relationships"] if r["status"] == "approved"]
+    assert approved and approved[0]["from_table"] == fk["from_table"]
+
+    # 제외하면 저장에서 삭제된다
+    decision["status"] = "rejected"
+    assert store.save_relationships(profile["id"], [decision]) == []
+    assert store.discover_relationships(profile["id"])["summary"]["approved"] == 0

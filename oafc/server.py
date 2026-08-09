@@ -258,11 +258,17 @@ class IntegratorHandler(BaseHTTPRequestHandler):
 
     def _api_put(self, path: str) -> None:
         connection_id, action = self._route(path)
-        if not connection_id or action != "tables":
+        if not connection_id:
             raise NotFoundError("route not found")
         body = self._body()
-        self._json({"tables": self.server.store.select_tables(
-            connection_id, body.get("tables"), body.get("databases"))})
+        if action == "tables":
+            self._json({"tables": self.server.store.select_tables(
+                connection_id, body.get("tables"), body.get("databases"))})
+        elif action == "relationships":
+            self._json({"relationships": self.server.store.save_relationships(
+                connection_id, body.get("relationships"))})
+        else:
+            raise NotFoundError("route not found")
 
     def do_DELETE(self) -> None:
         if not self._authorize(mutating=True):
