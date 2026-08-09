@@ -1264,6 +1264,63 @@ class IntegratorStore:
             result.append(item)
         return result
 
+    def semantic_model(self, connection_id: str) -> dict[str, Any]:
+        """선택 테이블·적용 온톨로지·승인 관계를 하나의 Enterprise Business Model 로 통합한다.
+
+        문서 12장(Business Ontology) / 14장(Provenance) 에 맞춰, 각 엔티티는
+        비즈니스 라벨과 속성(컬럼 의미)을 가지며 관계는 검증 근거를 함께 담는다.
+        """
+        profile = self.get_connection(connection_id)
+        selection = {item["table_name"]: item for item in self.selected_table_details(connection_id)}
+        definitions = self.ontology(connection_id)
+        table_defs = {d["table_name"]: d for d in definitions if d["target_type"] == "table"}
+        column_defs: dict[str, list[dict[str, Any]]] = {}
+        for d in definitions:
+            if d["target_type"] == "column":
+                column_defs.setdefault(d["table_name"], []).append(d)
+
+        entities = []
+        for table_name in sorted(selection):
+            table_def = table_defs.get(table_name)
+            entities.append({
+                "entity": (table_def or {}).get("label") or self._label(table_name),
+                "table": table_name,
+                "business_domain": selection[table_name]["business_domain"],
+                "usage_purpose": selection[table_name]["usage_purpose"],
+                "description": (table_def or {}).get("description", ""),
+                "defined": table_def is not None,
+                "attributes": [{
+                    "column": d["column_name"], "label": d["label"],
+                    "semantic_type": d["semantic_type"], "description": d["description"],
+                    "synonyms": d["synonyms"], "confidence": d["confidence"],
+                } for d in sorted(column_defs.get(table_name, []), key=lambda x: x["column_name"])],
+            })
+
+        relationships = [{
+            "from_entity": self._label(r["from_table"]), "to_entity": self._label(r["to_table"]),
+            "from_table": r["from_table"], "from_column": r["from_column"],
+            "to_table": r["to_table"], "to_column": r["to_column"],
+            "predicate": r["predicate"], "method": r["method"], "confidence": r["confidence"],
+            "evidence": r["evidence"], "provenance": {
+                "validated_by": r["validated_by"], "validated_at": r["validated_at"],
+            },
+        } for r in self.saved_relationships(connection_id) if r["status"] == "approved"]
+
+        defined_entities = sum(1 for e in entities if e["defined"])
+        return {
+            "connection": {"id": profile["id"], "name": profile["name"], "engine": profile["engine"]},
+            "generated_at": self._now(),
+            "entities": entities,
+            "relationships": relationships,
+            "summary": {
+                "entity_count": len(entities),
+                "defined_entity_count": defined_entities,
+                "attribute_count": sum(len(e["attributes"]) for e in entities),
+                "relationship_count": len(relationships),
+                "coverage": round(defined_entities / len(entities), 3) if entities else 0.0,
+            },
+        }
+
     def workflow(self) -> dict[str, Any]:
         conn = self._connection()
         connection_count = conn.execute("SELECT COUNT(*) FROM connections").fetchone()[0]

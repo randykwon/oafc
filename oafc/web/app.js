@@ -776,6 +776,71 @@
     }).join("");
   }
 
+  /* -- Enterprise Business Model (통합 Semantic Model) -- */
+  function renderSemanticModel(model) {
+    state.semanticModel = model;
+    var s = model.summary || {};
+    $("modelSummary").innerHTML =
+      "<div class=\"metric\"><b>" + (s.entity_count || 0) + "</b><span>엔티티</span></div>" +
+      "<div class=\"metric\"><b>" + (s.attribute_count || 0) + "</b><span>속성</span></div>" +
+      "<div class=\"metric\"><b>" + (s.relationship_count || 0) + "</b><span>승인 관계</span></div>" +
+      "<div class=\"metric\"><b>" + Math.round((s.coverage || 0) * 100) + "%</b><span>정의 커버리지</span></div>";
+    var view = $("modelView");
+    var entities = model.entities || [];
+    if (!entities.length) {
+      view.className = "model-view empty";
+      view.textContent = "선택된 업무 테이블이 없습니다. 3단계에서 테이블을 선택하세요.";
+      $("exportModelBtn").disabled = true;
+      return;
+    }
+    view.className = "model-view";
+    var html = entities.map(function (e) {
+      var attrs = (e.attributes || []).slice(0, 8).map(function (a) {
+        return "<span class=\"chip\">" + esc(a.label) + " · " + esc(a.semantic_type) + "</span>";
+      }).join("");
+      var more = (e.attributes || []).length > 8 ? "<span class=\"chip\">+" + (e.attributes.length - 8) + "</span>" : "";
+      return "<div class=\"model-entity" + (e.defined ? " defined" : "") + "\">" +
+        "<div class=\"model-entity-head\"><b>" + esc(e.entity) + "</b>" +
+        (e.business_domain ? "<span class=\"rel-pred\">" + esc(e.business_domain) + "</span>" : "") +
+        "<span class=\"model-table\">" + esc(e.table) + "</span></div>" +
+        (e.description ? "<div class=\"model-desc\">" + esc(e.description) + "</div>" : "") +
+        "<div class=\"column-chips\">" + attrs + more + "</div></div>";
+    }).join("");
+    var rels = (model.relationships || []).map(function (r) {
+      return "<div class=\"model-rel\"><b>" + esc(r.from_entity) + "</b> <span class=\"rel-pred\">" +
+        esc(r.predicate) + "</span> <b>" + esc(r.to_entity) + "</b>" +
+        "<span class=\"model-conf\">" + Math.round(r.confidence * 100) + "%</span></div>";
+    }).join("");
+    view.innerHTML = "<div class=\"model-entities\">" + html + "</div>" +
+      (rels ? "<div class=\"model-rels\"><span class=\"eyebrow\">RELATIONSHIPS</span>" + rels + "</div>" : "");
+    $("exportModelBtn").disabled = false;
+  }
+  function loadSemanticModel() {
+    return request("/api/connections/" + encodeURIComponent(state.activeId) + "/semantic-model")
+      .then(function (model) { renderSemanticModel(model); })
+      .catch(function (error) { $("modelView").textContent = error.message; toast(error.message); });
+  }
+  $("buildModelBtn").addEventListener("click", function () {
+    if (!state.activeId) { toast("먼저 연결을 선택하세요."); return; }
+    var button = this;
+    button.disabled = true;
+    $("modelView").className = "model-view empty";
+    $("modelView").textContent = "엔티티·관계·온톨로지를 통합하는 중…";
+    loadSemanticModel().finally(function () { button.disabled = false; });
+  });
+  $("exportModelBtn").addEventListener("click", function () {
+    if (!state.semanticModel) return;
+    var name = (state.activeProfile && state.activeProfile.name || "semantic-model")
+      .replace(/[^a-zA-Z0-9_-]+/g, "_");
+    var blob = new Blob([JSON.stringify(state.semanticModel, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = name + ".semantic-model.json";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast("Semantic Model JSON을 내보냈습니다.");
+  });
+
   function quoteAnalysisTable(name) {
     if (!state.activeProfile || state.activeProfile.engine !== "mysql") {
       return "\"" + String(name).replace(/\"/g, "\"\"") + "\"";

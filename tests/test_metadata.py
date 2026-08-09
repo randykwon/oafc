@@ -166,3 +166,36 @@ def test_relationship_approval_persists_with_provenance(store, source_root):
     decision["status"] = "rejected"
     assert store.save_relationships(profile["id"], [decision]) == []
     assert store.discover_relationships(profile["id"])["summary"]["approved"] == 0
+
+
+def test_semantic_model_integrates_entities_and_relationships(store, source_root):
+    """Semantic Model: 선택 테이블(엔티티)+온톨로지 속성+승인 관계를 통합한다."""
+    _root, source = source_root
+    profile = store.save_connection({"engine": "sqlite", "name": "Commerce", "location": str(source)})
+    assert store.test_connection(profile["id"])["connected"] is True
+    store.select_tables(profile["id"], [
+        {"table_name": "products", "business_domain": "catalog", "usage_purpose": "제품 기준정보"},
+        {"table_name": "orders", "business_domain": "sales", "usage_purpose": "주문"},
+    ])
+    store.apply_ontology(profile["id"], store.ontology_suggestions(profile["id"]))
+    # 물리 FK 관계 승인
+    fk = [r for r in store.discover_relationships(profile["id"])["relationships"]
+          if r["method"] == "physical_fk"][0]
+    decision = {k: fk[k] for k in ("from_table", "from_column", "to_table", "to_column",
+                                   "predicate", "method", "confidence", "evidence")}
+    decision["status"] = "approved"
+    store.save_relationships(profile["id"], [decision])
+
+    model = store.semantic_model(profile["id"])
+    assert model["summary"]["entity_count"] == 2
+    assert model["summary"]["defined_entity_count"] == 2   # 온톨로지 적용됨
+    assert model["summary"]["coverage"] == 1.0
+    assert model["summary"]["attribute_count"] > 0
+    # 승인 관계가 provenance 와 함께 포함된다
+    assert model["summary"]["relationship_count"] == 1
+    rel = model["relationships"][0]
+    assert rel["from_entity"] == "Orders" and rel["to_entity"] == "Products"
+    assert rel["provenance"]["validated_by"] == "user" and rel["provenance"]["validated_at"]
+    # 엔티티는 속성(컬럼 의미)을 가진다
+    entity = [e for e in model["entities"] if e["table"] == "products"][0]
+    assert entity["business_domain"] == "catalog" and entity["attributes"]

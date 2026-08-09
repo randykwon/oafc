@@ -136,6 +136,20 @@ input[readonly] { color: #b1bed0; }
 .relationship-row.status-rejected { opacity: .55; }
 .rel-actions { display: flex; gap: 6px; margin-top: 8px; }
 .rel-actions button { font-size: 10px; }
+
+/* Enterprise Business Model (Semantic Model) */
+.model-view { margin-top: 4px; }
+.model-view.empty { color: var(--muted); font-size: 12px; padding: 14px; border: 1px dashed var(--line); border-radius: 10px; }
+.model-entities { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 9px; }
+.model-entity { padding: 12px 14px; border: 1px solid var(--line); background: #0f1a2a; border-radius: 10px; border-left-width: 3px; border-left-color: #6b7aa5; }
+.model-entity.defined { border-left-color: #3ecf8e; }
+.model-entity-head { display: flex; align-items: center; gap: 6px; font-size: 13px; flex-wrap: wrap; }
+.model-table { margin-left: auto; font-size: 9px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+.model-desc { color: var(--muted); font-size: 10px; margin: 4px 0; }
+.model-rels { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.model-rels .eyebrow { display: block; margin-bottom: 2px; }
+.model-rel { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 7px 10px; border: 1px solid var(--line); background: #0f1a2a; border-radius: 8px; }
+.model-conf { margin-left: auto; font-size: 10px; color: #3ecf8e; }
 .ontology-list { display: grid; gap: 10px; margin-top: 20px; max-height: 560px; overflow: auto; padding-right: 4px; }
 .ontology-row { display: grid; grid-template-columns: 120px minmax(130px, .7fr) minmax(200px, 1.4fr) minmax(140px, .8fr); gap: 8px; padding: 12px; border: 1px solid var(--line); background: #0e1827; border-radius: 10px; }
 .ontology-row .target { color: var(--blue); font-size: 10px; overflow-wrap: anywhere; padding-top: 10px; }
