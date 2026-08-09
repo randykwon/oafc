@@ -217,6 +217,16 @@ button.danger:hover:not(:disabled) { border-color: var(--bad); background: rgba(
 .query-limits { display: flex; gap: 7px; }
 .query-limits label { display: grid; gap: 4px; min-width: 90px; }
 .query-limits select { padding: 7px 8px; font-size: 10px; }
+.nlq-box { margin-top: 16px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2, rgba(127,127,127,0.05)); }
+.nlq-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.nlq-tag { font-size: 9px; color: var(--muted); letter-spacing: .04em; }
+.nlq-input-row { display: flex; gap: 8px; }
+.nlq-input-row input { flex: 1; padding: 9px 11px; }
+.nlq-evidence { margin-top: 11px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.nlq-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.nlq-chip { padding: 3px 9px; border-radius: 999px; background: var(--accent-soft, rgba(90,120,255,0.12)); color: var(--accent, #5a78ff); font-size: 10px; }
+.nlq-note { margin: 8px 0 0; color: var(--muted); font-size: 10px; }
+.nlq-hint { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
 .query-editor { min-height: 180px; margin-top: 16px; resize: vertical; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; tab-size: 2; }
 .query-actions { justify-content: flex-end; margin-top: 10px; }
 .keyboard-hint { margin-right: auto; color: var(--muted); font-size: 10px; }

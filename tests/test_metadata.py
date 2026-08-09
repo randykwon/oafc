@@ -199,3 +199,41 @@ def test_semantic_model_integrates_entities_and_relationships(store, source_root
     # 엔티티는 속성(컬럼 의미)을 가진다
     entity = [e for e in model["entities"] if e["table"] == "products"][0]
     assert entity["business_domain"] == "catalog" and entity["attributes"]
+
+
+def test_nl_to_sql_drafts_safe_readonly_query(store, source_root):
+    """자연어 → 읽기전용 SELECT 초안: 엔티티/컬럼 매칭 + 집계, 검증기 통과."""
+    _root, source = source_root
+    profile = store.save_connection({"engine": "sqlite", "name": "Commerce", "location": str(source)})
+    assert store.test_connection(profile["id"])["connected"] is True
+    store.select_tables(profile["id"], [
+        {"table_name": "products", "business_domain": "catalog", "usage_purpose": "제품"},
+        {"table_name": "orders", "business_domain": "sales", "usage_purpose": "주문"},
+    ])
+    store.apply_ontology(profile["id"], store.ontology_suggestions(profile["id"]))
+
+    count = store.nl_to_sql(profile["id"], "how many products")
+    assert count["evidence"]["table"] == "products"
+    assert count["evidence"]["intent"] == "건수"
+    assert "COUNT(*)" in count["sql"]
+    # 생성 SQL 은 읽기전용 검증기를 통과해야 한다
+    assert store._validated_analysis_sql(count["sql"])
+    # 실제 실행되어야 한다
+    result = store.analyze_query(profile["id"], count["sql"])
+    assert result["row_count"] == 1
+
+    colq = store.nl_to_sql(profile["id"], "order quantity and total amount")
+    assert colq["evidence"]["table"] == "orders"
+    assert "quantity" in colq["sql"]
+    assert store._validated_analysis_sql(colq["sql"])
+
+    # 한국어 "별 … 수" → group-by + COUNT (order_status 로 그룹)
+    grouped = store.nl_to_sql(profile["id"], "상태별 주문 수")
+    assert grouped["evidence"]["table"] == "orders"
+    assert grouped["evidence"]["intent"] == "건수"
+    assert grouped["evidence"]["group_by"] == "order_status"
+    assert "GROUP BY" in grouped["sql"] and "COUNT(*)" in grouped["sql"]
+    assert store._validated_analysis_sql(grouped["sql"])
+
+    with pytest.raises(IntegratorError):
+        store.nl_to_sql(profile["id"], "   ")

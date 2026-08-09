@@ -1264,6 +1264,169 @@ class IntegratorStore:
             result.append(item)
         return result
 
+    _KR_EN_HINTS = {
+        "직원": "employee", "사원": "employee", "임직원": "employee",
+        "부서": "department", "조직": "department org", "팀": "team department",
+        "급여": "salary pay", "월급": "salary pay", "연봉": "salary annual",
+        "보상": "compensation pay", "평가": "evaluation", "성과": "performance",
+        "이름": "name", "성명": "name", "상태": "status", "근무지": "location work",
+        "제품": "product", "상품": "product", "주문": "order", "고객": "customer",
+        "공급": "supplier supply", "수량": "quantity", "금액": "amount", "가격": "price",
+        "날짜": "date", "나이": "age", "년": "year", "월": "month",
+    }
+
+    def _quote_analysis_table(self, engine: str, qualified: str) -> str:
+        if engine == "mysql":
+            return ".".join("`%s`" % part.replace("`", "``") for part in qualified.split("."))
+        return self._sqlite_identifier(qualified)
+
+    @staticmethod
+    def _quote_analysis_column(engine: str, name: str) -> str:
+        if engine == "mysql":
+            return "`%s`" % name.replace("`", "``")
+        return '"%s"' % name.replace('"', '""')
+
+    def nl_to_sql(self, connection_id: str, question: Any) -> dict[str, Any]:
+        """Semantic Model 을 근거로 자연어 질문에서 읽기 전용 SELECT 초안을 생성한다.
+
+        실행은 하지 않는다. 사용자가 분석 워크스페이스에서 검토한 뒤 실행한다
+        (Human-in-the-loop + Evidence). LLM 없이 엔티티/속성 매칭 규칙으로 동작한다.
+        """
+        if not isinstance(question, str) or not question.strip():
+            raise IntegratorError("question is required")
+        text = question.strip()
+        low = text.lower()
+        # 자동 생성 라벨/컬럼명은 영어라, 흔한 한국어 업무 용어를 영어 토큰으로 확장해
+        # 매칭을 보강한다 (사용자가 한국어 동의어를 정의하면 그쪽이 우선 활용된다).
+        for ko, en in self._KR_EN_HINTS.items():
+            if ko in text:
+                low += " " + en
+        model = self.semantic_model(connection_id)
+        entities = model["entities"]
+        if not entities:
+            raise IntegratorError("select business tables and apply ontology before natural-language query")
+        engine = model["connection"]["engine"]
+
+        def hits(term: str) -> int:
+            term = (term or "").lower().strip()
+            return low.count(term) if term and len(term) >= 2 else 0
+
+        # 1) 엔티티(테이블) 선택 — 토큰 IDF 가중 + 테이블 핵심명 부스트.
+        #    같은 용어가 여러 엔티티에 흩어져 있으면 변별력이 낮으므로(예: 여러 표에
+        #    'employee' 가 등장) 희소한 토큰(예: 한 표에만 있는 'department')에 더 큰
+        #    가중치를 준다. 또한 라벨/DB명 오염과 무관하게 '테이블 자체 이름'에 나타난
+        #    토큰이면 가산한다.
+        core = lambda q: re.split(r"__|\.", q)[-1]
+        q_tokens = {w for w in self._words(low) if len(w) >= 2}
+
+        def entity_tokens(ent: dict[str, Any]) -> set[str]:
+            toks = set(self._words(ent["entity"])) | set(self._words(core(ent["table"]))) | set(self._words(ent["business_domain"]))
+            for attr in ent["attributes"]:
+                toks |= set(self._words(attr["label"])) | set(self._words(attr["column"]))
+                for syn in attr.get("synonyms") or []:
+                    toks |= set(self._words(syn))
+            return toks
+
+        ent_tokens = [entity_tokens(ent) for ent in entities]
+        core_tokens = [set(self._words(core(ent["table"]))) for ent in entities]
+        n_entities = len(entities)
+        df: dict[str, int] = {}
+        for toks in ent_tokens:
+            for tok in toks:
+                df[tok] = df.get(tok, 0) + 1
+
+        best, best_score = None, 0.0
+        for ent, toks, ctoks in zip(entities, ent_tokens, core_tokens):
+            score = 0.0
+            for tok in (q_tokens & toks):
+                weight = math.log((n_entities + 1) / (df.get(tok, n_entities) + 1)) + 0.4  # IDF, 희소 토큰 우대
+                if tok in ctoks:
+                    weight *= 1.8  # 테이블 자체 이름에 있으면 강한 신호
+                score += weight
+            if score > best_score:
+                best, best_score = ent, score
+        if best is None:
+            best = entities[0]
+
+        # 2) 언급된 컬럼(속성) 매칭 — 엔티티 선택과 동일하게 토큰 기준으로 비교한다
+        #    (다단어 라벨 "Department Code" 도 질문 토큰 'department' 로 매칭되도록).
+        #    이미 엔티티(테이블)를 특정한 토큰(예: Employee 표의 'employee')은 컬럼을
+        #    다시 고르는 신호로 쓰지 않는다 — 그러면 employee_id/no 까지 딸려오기 때문.
+        entity_name_tokens = set(self._words(best["entity"])) | set(self._words(core(best["table"])))
+        col_q_tokens = q_tokens - entity_name_tokens
+        matched_cols = []
+        for attr in best["attributes"]:
+            attr_tokens: set[str] = set()
+            for term in [attr["label"], attr["column"]] + (attr.get("synonyms") or []):
+                attr_tokens |= {w for w in self._words(term) if len(w) >= 2}
+            if attr_tokens & col_q_tokens:
+                matched_cols.append(attr)
+
+        table_sql = self._quote_analysis_table(engine, best["table"])
+
+        # 3) 집계/그룹 의도
+        agg = None
+        standalone_count = "수" in text.split() or text.rstrip("?！!. ").endswith(" 수")
+        if standalone_count or "how many" in low or any(k in low for k in ["몇", "개수", "건수", "count", "얼마나", "명", "number of"]):
+            agg = ("COUNT(*)", "건수")
+        elif any(k in low for k in ["합계", "총", "sum", "합"]):
+            agg = ("SUM", "합계")
+        elif any(k in low for k in ["평균", "average", "avg"]):
+            agg = ("AVG", "평균")
+        elif any(k in low for k in ["최대", "max", "가장 큰", "가장 높은"]):
+            agg = ("MAX", "최대")
+        elif any(k in low for k in ["최소", "min", "가장 작은", "가장 낮은"]):
+            agg = ("MIN", "최소")
+
+        group_col = None
+        if "별" in text or any(k in low for k in ["그룹", "group", "each", "per "]):
+            reserved = matched_cols[:1] if agg else []
+            # 질문에 그룹 기준이 명시됐다면(예: "부서별") 그 컬럼을 최우선한다.
+            group_col = next((c for c in matched_cols if c not in reserved), None)
+            # 없으면 분류형(카테고리) → 식별자 순으로 고른다.
+            if group_col is None:
+                for wanted in ("classification", "identifier"):
+                    for attr in best["attributes"]:
+                        if attr["semantic_type"] == wanted and attr not in reserved:
+                            group_col = attr
+                            break
+                    if group_col is not None:
+                        break
+
+        evidence = {"entity": best["entity"], "table": best["table"],
+                    "columns": [c["column"] for c in matched_cols],
+                    "intent": (agg[1] if agg else "조회"),
+                    "group_by": group_col["column"] if group_col else None}
+
+        # 4) SQL 초안 조립
+        if agg:
+            fn = agg[0]
+            if fn == "COUNT(*)":
+                measure = "COUNT(*) AS 건수"
+            else:
+                numeric = next((c for c in matched_cols if c["semantic_type"] == "measure"),
+                               next((c for c in best["attributes"] if c["semantic_type"] == "measure"), None))
+                col = self._quote_analysis_column(engine, numeric["column"]) if numeric else "*"
+                measure = "%s(%s) AS %s" % (fn, col, agg[1])
+            if group_col:
+                gcol = self._quote_analysis_column(engine, group_col["column"])
+                sql = "SELECT %s, %s FROM %s GROUP BY %s ORDER BY %s DESC LIMIT 100" % (
+                    gcol, measure, table_sql, gcol, gcol)
+            else:
+                sql = "SELECT %s FROM %s LIMIT 100" % (measure, table_sql)
+        else:
+            if matched_cols:
+                select_cols = ", ".join(self._quote_analysis_column(engine, c["column"]) for c in matched_cols[:8])
+            else:
+                select_cols = "*"
+            sql = "SELECT %s FROM %s LIMIT 100" % (select_cols, table_sql)
+
+        return {
+            "question": text, "sql": sql, "engine": engine, "source": "rule",
+            "evidence": evidence,
+            "note": "Semantic Model 매칭으로 생성한 초안입니다. 검토 후 실행하세요.",
+        }
+
     def semantic_model(self, connection_id: str) -> dict[str, Any]:
         """선택 테이블·적용 온톨로지·승인 관계를 하나의 Enterprise Business Model 로 통합한다.
 

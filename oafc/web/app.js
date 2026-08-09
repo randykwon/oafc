@@ -1032,6 +1032,43 @@
       });
   }
 
+  function askNaturalLanguage() {
+    if (!state.activeId) return;
+    var question = $("nlQuestion").value.trim();
+    if (!question) { toast("질문을 입력하세요."); return; }
+    var connectionId = state.activeId;
+    var button = $("nlAskBtn");
+    var evidence = $("nlEvidence");
+    button.disabled = true;
+    evidence.hidden = true;
+    request("/api/connections/" + encodeURIComponent(connectionId) + "/analysis/nl-to-sql",
+      jsonOptions("POST", { question: question }))
+      .then(function (result) {
+        if (state.activeId !== connectionId) return;
+        $("analysisQuery").value = result.sql;
+        var ev = result.evidence || {};
+        var parts = [];
+        if (ev.entity) parts.push('<span class="nlq-chip">엔티티 · ' + esc(ev.entity) + "</span>");
+        if (ev.table) parts.push('<span class="nlq-chip">테이블 · ' + esc(ev.table) + "</span>");
+        if (ev.intent) parts.push('<span class="nlq-chip">의도 · ' + esc(ev.intent) + "</span>");
+        if (ev.group_by) parts.push('<span class="nlq-chip">그룹 · ' + esc(ev.group_by) + "</span>");
+        if (Array.isArray(ev.columns) && ev.columns.length) {
+          parts.push('<span class="nlq-chip">컬럼 · ' + esc(ev.columns.join(", ")) + "</span>");
+        }
+        var note = result.note ? '<p class="nlq-note">' + esc(result.note) + "</p>" : "";
+        evidence.innerHTML = '<div class="nlq-chips">' + parts.join("") + "</div>" + note +
+          '<p class="nlq-hint">초안 SQL을 검토한 뒤 <b>쿼리 실행</b>으로 실행하세요.</p>';
+        evidence.hidden = false;
+        notice("analysisStatus", "자연어 질문을 SELECT 초안으로 변환했습니다. 검토 후 실행하세요.", "neutral");
+      }).catch(function (error) {
+        if (state.activeId !== connectionId) return;
+        notice("analysisStatus", error.message, "bad");
+        toast(error.message);
+      }).finally(function () {
+        if (state.activeId === connectionId) button.disabled = false;
+      });
+  }
+
   function csvCell(value) {
     if (value == null) return "";
     var text = String(value);
@@ -1044,6 +1081,10 @@
   $("refreshAnalysisSchemaBtn").addEventListener("click", loadAnalysisContext);
   $("analysisDatabase").addEventListener("change", function () { loadAnalysisSchema(); });
   $("runAnalysisBtn").addEventListener("click", runAnalysis);
+  $("nlAskBtn").addEventListener("click", askNaturalLanguage);
+  $("nlQuestion").addEventListener("keydown", function (event) {
+    if (event.key === "Enter") { event.preventDefault(); askNaturalLanguage(); }
+  });
   $("clearAnalysisBtn").addEventListener("click", function () {
     $("analysisQuery").value = "";
     $("analysisQuery").focus();

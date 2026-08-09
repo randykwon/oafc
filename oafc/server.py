@@ -164,7 +164,7 @@ class IntegratorHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _route(path: str) -> tuple[str | None, str | None]:
-        match = re.fullmatch(r"/api/connections/([0-9a-fA-F-]+)(?:/(test|inventory|schema|tables|relationships|semantic-model|ontology|ontology/suggest|ontology/apply|analysis/query))?", path)
+        match = re.fullmatch(r"/api/connections/([0-9a-fA-F-]+)(?:/(test|inventory|schema|tables|relationships|semantic-model|ontology|ontology/suggest|ontology/apply|analysis/query|analysis/nl-to-sql))?", path)
         return match.groups() if match else (None, None)
 
     def _dispatch(self, callback) -> None:
@@ -240,6 +240,8 @@ class IntegratorHandler(BaseHTTPRequestHandler):
             raise NotFoundError("route not found")
         if action == "test":
             self._json(store.test_connection(connection_id))
+        elif action == "analysis/nl-to-sql":
+            self._json(store.nl_to_sql(connection_id, body.get("question")))
         elif action == "analysis/query":
             self._json(store.analyze_query(
                 connection_id, body.get("query"), body.get("database"),

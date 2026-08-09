@@ -175,6 +175,14 @@
                 <label><span>제한 시간</span><select id="analysisTimeout"><option value="2000">2초</option><option value="5000" selected>5초</option><option value="10000">10초</option></select></label>
               </div>
             </div>
+            <div class="nlq-box">
+              <div class="nlq-head"><span class="eyebrow">ASK IN NATURAL LANGUAGE</span><span class="nlq-tag">Semantic Model 기반 초안</span></div>
+              <div class="nlq-input-row">
+                <input id="nlQuestion" type="text" maxlength="240" placeholder="예: 부서별 직원 수, 월급 평균, 제품 개수" aria-label="자연어 질문">
+                <button id="nlAskBtn" class="primary small">SQL 초안 생성</button>
+              </div>
+              <div id="nlEvidence" class="nlq-evidence" hidden></div>
+            </div>
             <textarea id="analysisQuery" class="query-editor" spellcheck="false" aria-label="읽기 전용 SQL 쿼리" placeholder="SELECT * FROM table_name"></textarea>
             <div class="actions query-actions">
               <span class="keyboard-hint">⌘/Ctrl + Enter 실행 · SELECT/WITH 전용</span>
