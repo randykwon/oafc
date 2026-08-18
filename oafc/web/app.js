@@ -722,7 +722,8 @@
         "<br><span>" + esc(suggestion.semantic_type) + " · " + Math.round(suggestion.confidence * 100) + "%</span></div>" +
         "<input data-field=\"label\" value=\"" + esc(suggestion.label) + "\" aria-label=\"Label\">" +
         "<input data-field=\"description\" value=\"" + esc(suggestion.description) + "\" aria-label=\"Description\">" +
-        "<input data-field=\"synonyms\" value=\"" + esc((suggestion.synonyms || []).join(", ")) + "\" aria-label=\"Synonyms\">";
+        "<input data-field=\"synonyms\" value=\"" + esc((suggestion.synonyms || []).join(", ")) +
+        "\" aria-label=\"Synonyms\" placeholder=\"동의어 (예: 직원, 사원) · 자연어 조회에 사용\">";
       list.appendChild(row);
     });
   }

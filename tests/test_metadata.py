@@ -308,3 +308,29 @@ def test_saved_analysis_persists_and_validates(store, source_root):
     assert store.saved_analyses(profile["id"]) == []
     with pytest.raises(NotFoundError):
         store.delete_analysis(profile["id"], saved["id"])
+
+
+def test_nl_to_sql_uses_user_defined_korean_synonyms(store, source_root):
+    """온톨로지에 등록한 한국어 동의어가 NL 매칭을 이끈다(하드코딩 힌트 밖의 용어)."""
+    _root, source = source_root
+    profile = store.save_connection({"engine": "sqlite", "name": "Commerce", "location": str(source)})
+    store.test_connection(profile["id"])
+    store.select_tables(profile["id"], [
+        {"table_name": "products", "business_domain": "catalog", "usage_purpose": "제품"},
+        {"table_name": "orders", "business_domain": "sales", "usage_purpose": "주문"},
+    ])
+    definitions = store.ontology_suggestions(profile["id"])
+    # "품명"/"물품" 은 _KR_EN_HINTS 에 없다 — 오직 사용자 동의어로만 매칭될 수 있다.
+    for d in definitions:
+        if d["target_type"] == "table" and d["table_name"] == "products":
+            d["synonyms"] = ["물품"]
+        if d["table_name"] == "products" and d["column_name"] == "title":
+            d["synonyms"] = ["품명"]
+    store.apply_ontology(profile["id"], definitions)
+
+    # 힌트 사전에는 없지만 동의어로 등록했으므로 products.title 로 매칭되어야 한다.
+    draft = store.nl_to_sql(profile["id"], "물품 품명 보여줘")
+    assert draft["evidence"]["table"] == "products"
+    assert "title" in draft["evidence"]["columns"]
+    assert "title" in draft["sql"]
+    assert store._validated_analysis_sql(draft["sql"])

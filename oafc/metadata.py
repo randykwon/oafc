@@ -1390,29 +1390,50 @@ class IntegratorStore:
 
         def entity_tokens(ent: dict[str, Any]) -> set[str]:
             toks = set(self._words(ent["entity"])) | set(self._words(core(ent["table"]))) | set(self._words(ent["business_domain"]))
+            for syn in ent.get("synonyms") or []:
+                toks |= set(self._words(syn))
             for attr in ent["attributes"]:
                 toks |= set(self._words(attr["label"])) | set(self._words(attr["column"]))
                 for syn in attr.get("synonyms") or []:
                     toks |= set(self._words(syn))
             return toks
 
+        # 사용자가 정의한 동의어는 그대로(부분 문자열) 매칭한다 — _words 가 한글을 버리므로
+        # 토큰 경로로는 잡히지 않는 한국어 동의어(예: "부서")를 직접 활용하기 위해서다.
+        def entity_synonyms(ent: dict[str, Any]) -> set[str]:
+            out = set()
+            for group in [ent.get("synonyms") or []] + [a.get("synonyms") or [] for a in ent["attributes"]]:
+                for syn in group:
+                    s = str(syn).strip().lower()
+                    if len(s) >= 2:
+                        out.add(s)
+            return out
+
         ent_tokens = [entity_tokens(ent) for ent in entities]
         core_tokens = [set(self._words(core(ent["table"]))) for ent in entities]
+        ent_syns = [entity_synonyms(ent) for ent in entities]
         n_entities = len(entities)
         df: dict[str, int] = {}
         for toks in ent_tokens:
             for tok in toks:
                 df[tok] = df.get(tok, 0) + 1
+        df_syn: dict[str, int] = {}
+        for s_set in ent_syns:
+            for s in s_set:
+                df_syn[s] = df_syn.get(s, 0) + 1
 
         best, best_score = None, 0.0
         scores: dict[str, float] = {}
-        for ent, toks, ctoks in zip(entities, ent_tokens, core_tokens):
+        for ent, toks, ctoks, syns in zip(entities, ent_tokens, core_tokens, ent_syns):
             score = 0.0
             for tok in (q_tokens & toks):
                 weight = math.log((n_entities + 1) / (df.get(tok, n_entities) + 1)) + 0.4  # IDF, 희소 토큰 우대
                 if tok in ctoks:
                     weight *= 1.8  # 테이블 자체 이름에 있으면 강한 신호
                 score += weight
+            for s in syns:
+                if s in low:  # 큐레이션된 동의어 직접 매칭 — 희소할수록 강한 신호
+                    score += 2.0 / df_syn.get(s, n_entities)
             scores[ent["table"]] = score
             if score > best_score:
                 best, best_score = ent, score
@@ -1431,7 +1452,14 @@ class IntegratorStore:
                 attr_tokens: set[str] = set()
                 for term in [attr["label"], attr["column"]] + (attr.get("synonyms") or []):
                     attr_tokens |= {w for w in self._words(term) if len(w) >= 2}
-                if attr_tokens & col_q:
+                matched = bool(attr_tokens & col_q)
+                if not matched:  # 한국어 등 비-ASCII 동의어는 부분 문자열로 매칭
+                    for syn in attr.get("synonyms") or []:
+                        s = str(syn).strip().lower()
+                        if len(s) >= 2 and s in low:
+                            matched = True
+                            break
+                if matched:
                     out.append(attr)
             return out
 
@@ -1439,8 +1467,11 @@ class IntegratorStore:
 
         # 3) 집계/그룹 의도 (테이블과 무관하게 먼저 판단)
         agg = None
-        standalone_count = "수" in text.split() or text.rstrip("?！!. ").endswith(" 수")
-        if standalone_count or "how many" in low or any(k in low for k in ["몇", "개수", "건수", "count", "얼마나", "명", "number of"]):
+        count_tokens = set(text.split())
+        # "수"/"명" 은 단어의 일부("품명","점수")가 아니라 독립 토큰일 때만 카운트 신호로 본다.
+        standalone_count = "수" in count_tokens or text.rstrip("?！!. ").endswith(" 수")
+        if (standalone_count or "how many" in low or "number of" in low or "명" in count_tokens
+                or any(k in low for k in ["몇", "개수", "건수", "count", "얼마나"])):
             agg = ("COUNT(*)", "건수")
         elif any(k in low for k in ["합계", "총", "sum", "합", "total"]):
             agg = ("SUM", "합계")
@@ -1482,10 +1513,22 @@ class IntegratorStore:
         table_sql = self._quote_analysis_table(engine, best["table"])
         group_col = None
         if group_requested:
-            reserved = matched_cols[:1] if agg else []
-            # 질문에 그룹 기준이 명시됐다면(예: "부서별") 그 컬럼을 최우선한다.
-            group_col = next((c for c in matched_cols if c not in reserved), None)
-            # 없으면 분류형(카테고리) → 식별자 순으로 고른다.
+            # SUM/AVG 등은 매칭된 측정 컬럼을 집계 대상으로 예약해 그룹 기준에서 뺀다.
+            # 반면 COUNT(*) 는 측정 컬럼이 없으므로 매칭 컬럼을 그대로 그룹 후보로 쓴다.
+            reserved = []
+            if agg and agg[0] != "COUNT(*)":
+                measure_match = next((c for c in matched_cols if c["semantic_type"] == "measure"), None)
+                if measure_match:
+                    reserved = [measure_match]
+            # 질문에 그룹 기준이 명시됐다면 그 컬럼을 최우선하되, 매칭 컬럼 중에서도
+            # 분류형(카테고리) > 식별자 > 기타 순으로 고른다(order_id 보다 order_status).
+            candidates = [c for c in matched_cols if c not in reserved]
+            for wanted in ("classification", "identifier", None):
+                group_col = next((c for c in candidates
+                                  if wanted is None or c["semantic_type"] == wanted), None)
+                if group_col is not None:
+                    break
+            # 매칭 컬럼이 없으면 표 전체에서 분류형 → 식별자 순으로 고른다.
             if group_col is None:
                 for wanted in ("classification", "identifier"):
                     for attr in best["attributes"]:
@@ -1633,6 +1676,7 @@ class IntegratorStore:
                 "business_domain": selection[table_name]["business_domain"],
                 "usage_purpose": selection[table_name]["usage_purpose"],
                 "description": (table_def or {}).get("description", ""),
+                "synonyms": (table_def or {}).get("synonyms", []),
                 "defined": table_def is not None,
                 "attributes": [{
                     "column": d["column_name"], "label": d["label"],
