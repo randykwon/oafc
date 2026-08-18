@@ -164,7 +164,13 @@ class IntegratorHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _route(path: str) -> tuple[str | None, str | None]:
-        match = re.fullmatch(r"/api/connections/([0-9a-fA-F-]+)(?:/(test|inventory|schema|tables|relationships|semantic-model|ontology|ontology/suggest|ontology/apply|analysis/query|analysis/nl-to-sql))?", path)
+        match = re.fullmatch(r"/api/connections/([0-9a-fA-F-]+)(?:/(test|inventory|schema|tables|relationships|semantic-model|ontology|ontology/suggest|ontology/apply|analysis/query|analysis/nl-to-sql|analysis/saved))?", path)
+        return match.groups() if match else (None, None)
+
+    @staticmethod
+    def _route_saved_analysis(path: str) -> tuple[str | None, str | None]:
+        match = re.fullmatch(
+            r"/api/connections/([0-9a-fA-F-]+)/analysis/saved/([0-9a-fA-F-]+)", path)
         return match.groups() if match else (None, None)
 
     def _dispatch(self, callback) -> None:
@@ -218,6 +224,8 @@ class IntegratorHandler(BaseHTTPRequestHandler):
                 self._json(store.semantic_model(connection_id))
             elif action == "ontology":
                 self._json({"definitions": store.ontology(connection_id)})
+            elif action == "analysis/saved":
+                self._json({"analyses": store.saved_analyses(connection_id)})
             else:
                 raise NotFoundError("route not found")
             return
@@ -251,6 +259,8 @@ class IntegratorHandler(BaseHTTPRequestHandler):
         elif action == "ontology/apply":
             self._json({"definitions": store.apply_ontology(
                 connection_id, body.get("definitions") or [])})
+        elif action == "analysis/saved":
+            self._json(store.save_analysis(connection_id, body), 201)
         else:
             raise NotFoundError("route not found")
 
@@ -281,6 +291,11 @@ class IntegratorHandler(BaseHTTPRequestHandler):
         self._dispatch(lambda: self._api_delete(parsed.path))
 
     def _api_delete(self, path: str) -> None:
+        saved_conn, analysis_id = self._route_saved_analysis(path)
+        if saved_conn:
+            self.server.store.delete_analysis(saved_conn, analysis_id)
+            self._json({"deleted": True})
+            return
         connection_id, action = self._route(path)
         if not connection_id or action is not None:
             raise NotFoundError("route not found")

@@ -957,7 +957,85 @@
     $("analysisResult").className = "analysis-result empty";
     $("analysisResult").textContent = "쿼리를 실행하면 결과가 여기에 표시됩니다.";
     $("exportAnalysisBtn").disabled = true;
+    state.lastEvidence = null;
     loadAnalysisContext();
+    loadSavedAnalyses();
+  }
+
+  function renderSavedAnalyses(analyses) {
+    state.savedAnalyses = analyses || [];
+    var list = $("savedAnalysisList");
+    if (!state.savedAnalyses.length) {
+      list.className = "saved-analysis-list empty";
+      list.textContent = "저장한 분석 쿼리가 여기에 쌓입니다. 재사용·검토 가능한 조직 지식으로 남습니다.";
+      return;
+    }
+    list.className = "saved-analysis-list";
+    list.innerHTML = "";
+    state.savedAnalyses.forEach(function (a, index) {
+      var ev = a.evidence || {};
+      var meta = [];
+      if (ev.entity) meta.push("엔티티 " + esc(ev.entity));
+      if (ev.join) meta.push("조인 " + esc(ev.join.entity));
+      if (ev.intent) meta.push(esc(ev.intent));
+      var row = document.createElement("div");
+      row.className = "saved-analysis-row";
+      row.innerHTML =
+        "<div class=\"saved-head\"><b>" + esc(a.title || a.question || "저장된 분석") + "</b>" +
+        "<span class=\"saved-at\">" + esc((a.created_at || "").replace("T", " ").slice(0, 16)) + "</span></div>" +
+        (a.question ? "<div class=\"saved-q\">" + esc(a.question) + "</div>" : "") +
+        "<div class=\"saved-sql\">" + esc(a.sql) + "</div>" +
+        (meta.length ? "<div class=\"saved-meta\">" + meta.map(function (m) {
+          return "<span class=\"chip\">" + m + "</span>"; }).join("") + "</div>" : "") +
+        "<div class=\"saved-actions\">" +
+        "<button class=\"ghost small\" data-act=\"load\">불러오기</button>" +
+        "<button class=\"ghost small\" data-act=\"delete\">삭제</button></div>";
+      row.querySelector("[data-act=load]").addEventListener("click", function () { loadSavedAnalysis(index); });
+      row.querySelector("[data-act=delete]").addEventListener("click", function () { deleteSavedAnalysis(a); });
+      list.appendChild(row);
+    });
+  }
+
+  function loadSavedAnalyses() {
+    if (!state.activeId) return Promise.resolve();
+    return request("/api/connections/" + encodeURIComponent(state.activeId) + "/analysis/saved")
+      .then(function (data) { renderSavedAnalyses(data.analyses); })
+      .catch(function (error) { $("savedAnalysisList").textContent = error.message; });
+  }
+
+  function loadSavedAnalysis(index) {
+    var a = (state.savedAnalyses || [])[index];
+    if (!a) return;
+    $("analysisQuery").value = a.sql;
+    if (a.question) $("nlQuestion").value = a.question;
+    $("analysisQuery").scrollIntoView({ block: "center" });
+    toast("저장된 분석을 편집기에 불러왔습니다. 검토 후 실행하세요.");
+  }
+
+  function deleteSavedAnalysis(a) {
+    request("/api/connections/" + encodeURIComponent(state.activeId) +
+      "/analysis/saved/" + encodeURIComponent(a.id), { method: "DELETE" })
+      .then(function () { toast("저장된 분석을 삭제했습니다."); return loadSavedAnalyses(); })
+      .catch(function (error) { toast(error.message); });
+  }
+
+  function saveCurrentAnalysis() {
+    if (!state.activeId) return;
+    var sql = $("analysisQuery").value.trim();
+    if (!sql) { toast("저장할 SQL이 없습니다. 먼저 쿼리를 작성하거나 자연어로 생성하세요."); return; }
+    var question = $("nlQuestion").value.trim();
+    var button = $("saveAnalysisBtn");
+    button.disabled = true;
+    request("/api/connections/" + encodeURIComponent(state.activeId) + "/analysis/saved",
+      jsonOptions("POST", {
+        question: question, sql: sql,
+        evidence: state.lastEvidence || undefined,
+        engine: state.activeProfile ? state.activeProfile.engine : undefined,
+        source: state.lastEvidence ? "nl" : "manual"
+      }))
+      .then(function () { toast("분석을 Analytical Knowledge로 저장했습니다."); return loadSavedAnalyses(); })
+      .catch(function (error) { toast(error.message); })
+      .finally(function () { button.disabled = false; });
   }
 
   function renderAnalysisResult(result) {
@@ -1046,6 +1124,7 @@
       .then(function (result) {
         if (state.activeId !== connectionId) return;
         $("analysisQuery").value = result.sql;
+        state.lastEvidence = result.evidence || null;
         var ev = result.evidence || {};
         var parts = [];
         if (ev.entity) parts.push('<span class="nlq-chip">엔티티 · ' + esc(ev.entity) + "</span>");
@@ -1087,13 +1166,18 @@
   $("analysisDatabase").addEventListener("change", function () { loadAnalysisSchema(); });
   $("runAnalysisBtn").addEventListener("click", runAnalysis);
   $("nlAskBtn").addEventListener("click", askNaturalLanguage);
+  $("saveAnalysisBtn").addEventListener("click", saveCurrentAnalysis);
+  $("refreshSavedBtn").addEventListener("click", loadSavedAnalyses);
   $("nlQuestion").addEventListener("keydown", function (event) {
     if (event.key === "Enter") { event.preventDefault(); askNaturalLanguage(); }
   });
   $("clearAnalysisBtn").addEventListener("click", function () {
     $("analysisQuery").value = "";
+    state.lastEvidence = null;
     $("analysisQuery").focus();
   });
+  // 편집기를 직접 수정하면 자동 생성 Evidence 는 더 이상 이 SQL 을 설명하지 않는다.
+  $("analysisQuery").addEventListener("input", function () { state.lastEvidence = null; });
   $("analysisQuery").addEventListener("keydown", function (event) {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();

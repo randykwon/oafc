@@ -182,6 +182,19 @@ class IntegratorStore:
                     UNIQUE(connection_id, from_table, from_column, to_table, to_column),
                     FOREIGN KEY (connection_id) REFERENCES connections(id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS saved_analyses (
+                    id TEXT PRIMARY KEY,
+                    connection_id TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '',
+                    question TEXT NOT NULL DEFAULT '',
+                    sql TEXT NOT NULL,
+                    evidence TEXT NOT NULL DEFAULT '{}',
+                    engine TEXT NOT NULL DEFAULT '',
+                    source TEXT NOT NULL DEFAULT 'manual',
+                    created_by TEXT NOT NULL DEFAULT 'user',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (connection_id) REFERENCES connections(id) ON DELETE CASCADE
+                );
             """)
             self._ensure_columns(conn, "connections", {
                 "host": "TEXT NOT NULL DEFAULT ''", "port": "INTEGER NOT NULL DEFAULT 0",
@@ -1152,6 +1165,61 @@ class IntegratorStore:
                       json.dumps(evidence, ensure_ascii=False), "approved", "user", now))
             conn.commit()
         return self.saved_relationships(connection_id)
+
+    def saved_analyses(self, connection_id: str) -> list[dict[str, Any]]:
+        """저장된 분석(Analytical Knowledge) 목록을 최신순으로 반환한다."""
+        self.get_connection(connection_id)
+        rows = self._connection().execute(
+            "SELECT id,title,question,sql,evidence,engine,source,created_by,created_at "
+            "FROM saved_analyses WHERE connection_id=? ORDER BY created_at DESC", (connection_id,)).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["evidence"] = json.loads(item["evidence"]) if item["evidence"] else {}
+            except (ValueError, TypeError):
+                item["evidence"] = {}
+            out.append(item)
+        return out
+
+    def save_analysis(self, connection_id: str, payload: Any) -> dict[str, Any]:
+        """자연어 질문·SQL 초안·Evidence 를 재사용 가능한 분석 지식으로 저장한다.
+
+        SQL 은 저장 시점에도 읽기 전용 검증기를 통과해야 한다(문서 Analytical
+        Knowledge + Provenance): 저장된 쿼리를 뒤에 그대로 실행하기 때문이다.
+        """
+        self.get_connection(connection_id)
+        if not isinstance(payload, dict):
+            raise IntegratorError("analysis payload must be an object")
+        sql = self._validated_analysis_sql(payload.get("sql"))
+        question = str(payload.get("question") or "").strip()
+        title = str(payload.get("title") or "").strip() or (question[:80] if question else sql[:80])
+        evidence = payload.get("evidence")
+        if evidence is not None and not isinstance(evidence, dict):
+            raise IntegratorError("analysis evidence must be an object")
+        analysis_id = str(uuid.uuid4())
+        with self._write_lock:
+            conn = self._connection()
+            conn.execute("""
+                INSERT INTO saved_analyses
+                    (id,connection_id,title,question,sql,evidence,engine,source,created_by,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+            """, (analysis_id, connection_id, title, question, sql,
+                  json.dumps(evidence or {}, ensure_ascii=False),
+                  str(payload.get("engine") or ""), str(payload.get("source") or "manual"),
+                  "user", self._now()))
+            conn.commit()
+        return next(a for a in self.saved_analyses(connection_id) if a["id"] == analysis_id)
+
+    def delete_analysis(self, connection_id: str, analysis_id: str) -> None:
+        self.get_connection(connection_id)
+        with self._write_lock:
+            conn = self._connection()
+            cursor = conn.execute("DELETE FROM saved_analyses WHERE connection_id=? AND id=?",
+                                  (connection_id, analysis_id))
+            conn.commit()
+        if cursor.rowcount == 0:
+            raise NotFoundError("saved analysis not found")
 
     def ontology_suggestions(self, connection_id: str) -> list[dict[str, Any]]:
         selection_details = {item["table_name"]: item for item in self.selected_table_details(connection_id)}

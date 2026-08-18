@@ -241,6 +241,17 @@ button.danger:hover:not(:disabled) { border-color: var(--bad); background: rgba(
 .result-table th { position: sticky; top: 0; z-index: 1; color: var(--primary); background: #142238; text-align: left; }
 .result-table th, .result-table td { max-width: 340px; padding: 8px 10px; border-right: 1px solid #1e2d43; border-bottom: 1px solid #1e2d43; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-table td.null { color: #697a92; font-style: italic; }
+.saved-analyses { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 14px; }
+.saved-analysis-list { display: grid; gap: 10px; margin-top: 10px; }
+.saved-analysis-list.empty { color: var(--muted); font-size: 11px; padding: 14px; border: 1px dashed var(--line); border-radius: 10px; }
+.saved-analysis-row { border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; background: var(--surface-2, rgba(127,127,127,0.05)); }
+.saved-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.saved-head b { font-size: 12px; }
+.saved-at { color: var(--muted); font-size: 9px; white-space: nowrap; }
+.saved-q { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.saved-sql { margin-top: 7px; padding: 7px 9px; border-radius: 7px; background: #09121f; color: #b8c6da; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+.saved-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.saved-actions { display: flex; gap: 7px; margin-top: 9px; }
 @media (max-width: 980px) {
   .analysis-layout { grid-template-columns: 1fr; }
   .analysis-schema-list { max-height: 280px; }

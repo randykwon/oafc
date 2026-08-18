@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from oafc.metadata import EnvironmentCredentialResolver, IntegratorError
+from oafc.metadata import EnvironmentCredentialResolver, IntegratorError, NotFoundError
 from tests.fakes import FakeMySQLStore
 
 
@@ -277,3 +277,34 @@ def test_nl_to_sql_joins_related_entities(store, source_root):
     assert store._validated_analysis_sql(draft["sql"])
     result = store.analyze_query(profile["id"], draft["sql"])
     assert "category" in result["columns"]
+
+
+def test_saved_analysis_persists_and_validates(store, source_root):
+    """자연어 초안을 재사용 가능한 Analytical Knowledge 로 저장/삭제한다."""
+    _root, source = source_root
+    profile = store.save_connection({"engine": "sqlite", "name": "Commerce", "location": str(source)})
+    store.test_connection(profile["id"])
+    store.select_tables(profile["id"], [
+        {"table_name": "products", "business_domain": "catalog", "usage_purpose": "제품"},
+    ])
+    store.apply_ontology(profile["id"], store.ontology_suggestions(profile["id"]))
+    draft = store.nl_to_sql(profile["id"], "how many products")
+
+    saved = store.save_analysis(profile["id"], {
+        "title": "제품 수", "question": draft["question"], "sql": draft["sql"],
+        "evidence": draft["evidence"], "engine": draft["engine"], "source": "nl"})
+    assert saved["title"] == "제품 수"
+    assert saved["created_by"] == "user" and saved["created_at"]  # Provenance
+    assert saved["evidence"]["intent"] == "건수"
+
+    listed = store.saved_analyses(profile["id"])
+    assert [a["id"] for a in listed] == [saved["id"]]
+
+    # 저장 시점에도 읽기 전용 검증: 비-SELECT 는 거부
+    with pytest.raises(IntegratorError):
+        store.save_analysis(profile["id"], {"sql": "DELETE FROM products"})
+
+    store.delete_analysis(profile["id"], saved["id"])
+    assert store.saved_analyses(profile["id"]) == []
+    with pytest.raises(NotFoundError):
+        store.delete_analysis(profile["id"], saved["id"])

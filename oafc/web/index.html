@@ -186,6 +186,7 @@
             <textarea id="analysisQuery" class="query-editor" spellcheck="false" aria-label="읽기 전용 SQL 쿼리" placeholder="SELECT * FROM table_name"></textarea>
             <div class="actions query-actions">
               <span class="keyboard-hint">⌘/Ctrl + Enter 실행 · SELECT/WITH 전용</span>
+              <button id="saveAnalysisBtn" class="ghost">분석 저장</button>
               <button id="clearAnalysisBtn" class="ghost">지우기</button>
               <button id="runAnalysisBtn" class="primary">쿼리 실행</button>
             </div>
@@ -194,6 +195,13 @@
               <button id="exportAnalysisBtn" class="ghost small" disabled>CSV 다운로드</button>
             </div>
             <div id="analysisResult" class="analysis-result empty">쿼리를 실행하면 결과가 여기에 표시됩니다.</div>
+            <div class="saved-analyses">
+              <div class="analysis-section-head">
+                <div><span class="eyebrow">ANALYTICAL KNOWLEDGE</span><h2>저장된 분석</h2></div>
+                <button id="refreshSavedBtn" class="ghost small">새로고침</button>
+              </div>
+              <div id="savedAnalysisList" class="saved-analysis-list empty">저장한 분석 쿼리가 여기에 쌓입니다. 재사용·검토 가능한 조직 지식으로 남습니다.</div>
+            </div>
           </div>
         </div>
       </section>
